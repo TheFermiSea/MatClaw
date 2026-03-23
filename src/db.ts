@@ -375,20 +375,18 @@ export function getNewMessages(
   if (jids.length === 0) return { messages: [], newTimestamp: lastTimestamp };
 
   const placeholders = jids.map(() => '?').join(',');
-  // Filter bot messages using both the is_bot_message flag AND the content
-  // prefix as a backstop for messages written before the migration ran.
   const sql = `
     SELECT id, chat_jid, thread_id, sender, sender_name, content, timestamp, is_from_me
     FROM messages
     WHERE timestamp > ? AND chat_jid IN (${placeholders})
-      AND is_bot_message = 0 AND content NOT LIKE ?
+      AND is_bot_message = 0
       AND content != '' AND content IS NOT NULL
     ORDER BY timestamp
   `;
 
   const rows = db
     .prepare(sql)
-    .all(lastTimestamp, ...jids, `${botPrefix}:%`) as NewMessage[];
+    .all(lastTimestamp, ...jids) as NewMessage[];
 
   let newTimestamp = lastTimestamp;
   for (const row of rows) {
@@ -431,11 +429,10 @@ export function getMessagesSince(
     'chat_jid = ?',
     'timestamp > ?',
     'is_bot_message = 0',
-    'content NOT LIKE ?',
     "content != ''",
     'content IS NOT NULL',
   ];
-  const values: unknown[] = [chatJid, sinceTimestamp, `${botPrefix}:%`];
+  const values: unknown[] = [chatJid, sinceTimestamp];
   if (threadId) {
     filters.push('thread_id = ?');
     values.push(threadId);
@@ -538,6 +535,14 @@ export function deleteTask(id: string): void {
   // Delete child records first (FK constraint)
   db.prepare('DELETE FROM task_run_logs WHERE task_id = ?').run(id);
   db.prepare('DELETE FROM scheduled_tasks WHERE id = ?').run(id);
+}
+
+export function deleteMessage(id: string): void {
+  db.prepare('DELETE FROM messages WHERE id = ?').run(id);
+}
+
+export function markMessageAsBot(id: string): void {
+  db.prepare('UPDATE messages SET is_bot_message = 1 WHERE id = ?').run(id);
 }
 
 export function getDueTasks(): ScheduledTask[] {
@@ -696,13 +701,21 @@ export function assignWebChatThreadSession(
   threadId: string,
   sessionId: string,
 ): void {
+  // Append session ID (comma-separated) instead of overwriting
+  const row = db
+    .prepare('SELECT agent_session_id FROM web_chat_threads WHERE id = ?')
+    .get(threadId) as { agent_session_id: string | null } | undefined;
+  const existing = row?.agent_session_id || '';
+  const ids = existing.split(',').filter(Boolean);
+  if (ids.includes(sessionId)) return; // already tracked
+  ids.push(sessionId);
   db.prepare(
     `
     UPDATE web_chat_threads
     SET agent_session_id = ?, updated_at = COALESCE(updated_at, ?)
     WHERE id = ?
   `,
-  ).run(sessionId, new Date().toISOString(), threadId);
+  ).run(ids.join(','), new Date().toISOString(), threadId);
 }
 
 export function renameWebChatThread(
@@ -786,15 +799,21 @@ export function getRegisteredGroup(
     );
     return undefined;
   }
+  let containerConfig: RegisteredGroup['containerConfig'] | undefined;
+  if (row.container_config) {
+    try {
+      containerConfig = JSON.parse(row.container_config);
+    } catch {
+      logger.warn({ jid: row.jid }, 'Malformed container_config JSON, ignoring');
+    }
+  }
   return {
     jid: row.jid,
     name: row.name,
     folder: row.folder,
     trigger: row.trigger_pattern,
     added_at: row.added_at,
-    containerConfig: row.container_config
-      ? JSON.parse(row.container_config)
-      : undefined,
+    containerConfig,
     requiresTrigger:
       row.requires_trigger === null ? undefined : row.requires_trigger === 1,
     isMain: row.is_main === 1 ? true : undefined,
@@ -840,14 +859,20 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
       );
       continue;
     }
+    let containerConfig: RegisteredGroup['containerConfig'] | undefined;
+    if (row.container_config) {
+      try {
+        containerConfig = JSON.parse(row.container_config);
+      } catch {
+        logger.warn({ jid: row.jid }, 'Malformed container_config JSON, ignoring');
+      }
+    }
     result[row.jid] = {
       name: row.name,
       folder: row.folder,
       trigger: row.trigger_pattern,
       added_at: row.added_at,
-      containerConfig: row.container_config
-        ? JSON.parse(row.container_config)
-        : undefined,
+      containerConfig,
       requiresTrigger:
         row.requires_trigger === null ? undefined : row.requires_trigger === 1,
       isMain: row.is_main === 1 ? true : undefined,

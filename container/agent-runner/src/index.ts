@@ -108,7 +108,13 @@ function drainIpcInput(): string[] {
         }
       } catch (err) {
         log(`Failed to process input file ${file}: ${err instanceof Error ? err.message : String(err)}`);
-        try { fs.unlinkSync(filePath); } catch { /* ignore */ }
+        // Only delete if the file is stale (>5s old) — otherwise it may be a partial write
+        try {
+          const stat = fs.statSync(filePath);
+          if (Date.now() - stat.mtimeMs > 5000) {
+            fs.unlinkSync(filePath);
+          }
+        } catch { /* already gone */ }
       }
     }
     return messages;
@@ -219,12 +225,24 @@ async function main(): Promise<void> {
     sdkEnv[key] = value;
   }
 
-  // Persist fresh secrets to IPC so refreshSdkEnv() doesn't overwrite with stale tokens
-  if (containerInput.secrets && Object.keys(containerInput.secrets).length > 0) {
-    try {
-      fs.writeFileSync(IPC_SECRETS_PATH, JSON.stringify(containerInput.secrets));
-    } catch {
-      // Non-fatal: refreshSdkEnv will still work with stdin secrets in sdkEnv
+  // Persist initial secrets to IPC so refreshSdkEnv() sees consistent state.
+  // Include Docker-injected infrastructure values (ANTHROPIC_BASE_URL, ANTHROPIC_API_KEY, etc.)
+  // alongside stdin secrets, so refreshSdkEnv doesn't delete them from sdkEnv.
+  {
+    const initialSecrets: Record<string, string> = {};
+    for (const key of MANAGED_SDK_ENV_KEYS) {
+      const val = sdkEnv[key];
+      if (val) initialSecrets[key] = val;
+    }
+    for (const [key, value] of Object.entries(containerInput.secrets || {})) {
+      if (value) initialSecrets[key] = value;
+    }
+    if (Object.keys(initialSecrets).length > 0) {
+      try {
+        fs.writeFileSync(IPC_SECRETS_PATH, JSON.stringify(initialSecrets));
+      } catch {
+        // Non-fatal: refreshSdkEnv will still work with stdin secrets in sdkEnv
+      }
     }
   }
 
@@ -319,4 +337,11 @@ async function main(): Promise<void> {
   }
 }
 
-main();
+main().catch((err) => {
+  writeOutput({
+    status: 'error',
+    result: null,
+    error: `Unhandled error: ${err instanceof Error ? err.message : String(err)}`,
+  });
+  process.exit(1);
+});

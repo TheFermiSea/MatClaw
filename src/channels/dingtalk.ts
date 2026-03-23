@@ -253,6 +253,31 @@ export class DingTalkChannel implements Channel {
       await this.client.connect();
       this.connected = true;
       logger.info('DingTalk: Stream client connected');
+
+      // Reconnect on disconnect with exponential backoff
+      if (this.client.on) {
+        this.client.on('disconnect', () => {
+          this.connected = false;
+          logger.warn('DingTalk: Stream disconnected, attempting reconnect...');
+          let retries = 0;
+          const reconnect = () => {
+            const delay = Math.min(5000 * Math.pow(2, retries), 300_000);
+            setTimeout(async () => {
+              try {
+                await this.client!.connect();
+                this.connected = true;
+                retries = 0;
+                logger.info('DingTalk: Stream reconnected');
+              } catch (err) {
+                retries++;
+                logger.warn({ err, retries }, 'DingTalk: reconnect failed, retrying');
+                reconnect();
+              }
+            }, delay);
+          };
+          reconnect();
+        });
+      }
     } catch (err) {
       logger.error({ err }, 'DingTalk: failed to start stream client');
     }

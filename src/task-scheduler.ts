@@ -37,7 +37,15 @@ export function computeNextRun(task: ScheduledTask): string | null {
     const interval = CronExpressionParser.parse(task.schedule_value, {
       tz: TIMEZONE,
     });
-    return interval.next().toISOString();
+    const nextIso = interval.next().toISOString();
+    if (!nextIso) {
+      logger.warn(
+        { taskId: task.id, schedule: task.schedule_value },
+        'Cron next() returned null ISO string, using 60s fallback',
+      );
+      return new Date(Date.now() + 60_000).toISOString();
+    }
+    return nextIso;
   }
 
   if (task.schedule_type === 'interval') {
@@ -52,7 +60,9 @@ export function computeNextRun(task: ScheduledTask): string | null {
     }
     // Anchor to the scheduled time, not now, to prevent drift.
     // Skip past any missed intervals so we always land in the future.
-    let next = new Date(task.next_run!).getTime() + ms;
+    // Guard: if next_run is null or invalid, anchor to now instead.
+    const anchor = task.next_run ? new Date(task.next_run).getTime() : NaN;
+    let next = (isNaN(anchor) ? now : anchor) + ms;
     while (next <= now) {
       next += ms;
     }

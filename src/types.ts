@@ -30,6 +30,7 @@ export interface AllowedRoot {
 export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
   timeout?: number; // Default: 300000 (5 minutes)
+  mode?: string; // Per-group operating mode override (compute, intelligence, modeling, etc.)
 }
 
 export interface RegisteredGroup {

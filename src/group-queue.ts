@@ -2,7 +2,8 @@ import { ChildProcess } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
-import { DATA_DIR, MAX_CONCURRENT_CONTAINERS } from './config.js';
+import { CREDENTIAL_PROXY_PORT, DATA_DIR, MAX_CONCURRENT_CONTAINERS } from './config.js';
+import { killContainer } from './container-runtime.js';
 import { readEnvFile } from './env.js';
 import { logger } from './logger.js';
 
@@ -179,6 +180,11 @@ export class GroupQueue {
       'CODEX_MODEL',
       'GOOGLE_API_KEY',
     ]);
+    // Always include the credential proxy URL so refreshSdkEnv in the container
+    // doesn't delete the Docker-injected ANTHROPIC_BASE_URL.
+    if (!secrets.ANTHROPIC_BASE_URL) {
+      secrets.ANTHROPIC_BASE_URL = `http://host.docker.internal:${CREDENTIAL_PROXY_PORT}`;
+    }
     if (Object.keys(secrets).length === 0) return;
 
     const ipcDir = path.join(DATA_DIR, 'ipc', groupFolder);
@@ -408,22 +414,36 @@ export class GroupQueue {
     }
   }
 
-  async shutdown(_gracePeriodMs: number): Promise<void> {
+  async shutdown(gracePeriodMs: number): Promise<void> {
     this.shuttingDown = true;
 
-    // Count active containers but don't kill them — they'll finish on their own
-    // via idle timeout or container timeout. The --rm flag cleans them up on exit.
-    // This prevents WhatsApp reconnection restarts from killing working agents.
-    const activeContainers: string[] = [];
-    for (const [jid, state] of this.groups) {
-      if (state.process && !state.process.killed && state.containerName) {
-        activeContainers.push(state.containerName);
+    // Send SIGTERM to all active containers first
+    const containerNames: string[] = [];
+    for (const [, state] of this.groups) {
+      if (state.process && !state.process.killed) {
+        try { state.process.kill('SIGTERM'); } catch { /* already dead */ }
+        if (state.containerName) containerNames.push(state.containerName);
+      }
+    }
+
+    if (containerNames.length > 0) {
+      // Give containers time to handle SIGTERM gracefully before force-killing
+      const grace = Math.min(gracePeriodMs, 10000);
+      logger.info(
+        { activeCount: this.activeCount, containers: containerNames, graceMs: grace },
+        'GroupQueue shutting down, waiting for containers to exit gracefully',
+      );
+      await new Promise((r) => setTimeout(r, grace));
+
+      // Force-kill any that are still running
+      for (const name of containerNames) {
+        try { killContainer(name); } catch { /* best effort */ }
       }
     }
 
     logger.info(
-      { activeCount: this.activeCount, detachedContainers: activeContainers },
-      'GroupQueue shutting down (containers detached, not killed)',
+      { activeCount: this.activeCount, killed: containerNames },
+      'GroupQueue shutdown complete',
     );
   }
 }

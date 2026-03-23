@@ -47,6 +47,9 @@ class MessageStream {
       if (this.done) return;
       await new Promise<void>(r => { this.waiting = r; });
       this.waiting = null;
+      // Re-check done after waking — end() may have fired while we were
+      // between yield resumption and setting up the new promise.
+      if (this.done && this.queue.length === 0) return;
     }
   }
 }
@@ -245,6 +248,7 @@ export class ClaudeEngine implements AgentEngine {
       delete ctx.sdkEnv['CLAUDE_CODE_MODEL'];
     }
 
+    try {
     for await (const message of query({
       prompt: stream,
       options: {
@@ -338,7 +342,9 @@ export class ClaudeEngine implements AgentEngine {
       }
     }
 
-    ipcPolling = false;
+    } finally {
+      ipcPolling = false;
+    }
     ctx.log(`Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`);
     return { newSessionId, lastAssistantUuid, closedDuringQuery };
   }

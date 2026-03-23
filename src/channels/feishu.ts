@@ -212,7 +212,7 @@ export class FeishuChannel implements Channel {
     }
 
     await this.setupWebSocket();
-    this.connected = true;
+    // connected flag is set inside setupWebSocket() after successful start
   }
 
   async sendMessage(jid: string, text: string): Promise<void> {
@@ -389,6 +389,10 @@ export class FeishuChannel implements Channel {
 
   async disconnect(): Promise<void> {
     this.connected = false;
+    if (this.wsClient) {
+      try { (this.wsClient as any).close?.(); } catch { /* best effort */ }
+      this.wsClient = null;
+    }
   }
 
   async setTyping(_jid: string, _isTyping: boolean): Promise<void> {
@@ -436,8 +440,14 @@ export class FeishuChannel implements Channel {
       },
     });
 
-    this.wsClient.start({ eventDispatcher: this.eventDispatcher });
-    logger.info('Feishu: WebSocket client started');
+    try {
+      await this.wsClient.start({ eventDispatcher: this.eventDispatcher });
+      this.connected = true;
+      logger.info('Feishu: WebSocket client started');
+    } catch (err) {
+      logger.error({ err }, 'Feishu: WebSocket start failed');
+      // Don't set connected — caller will see isConnected()=false
+    }
   }
 
   private async handleMessageEvent(event: FeishuMessageEvent): Promise<void> {

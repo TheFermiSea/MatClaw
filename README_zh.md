@@ -301,6 +301,9 @@ npm install && npm run setup
 - [Docker](https://docs.docker.com/get-docker/)
 - Anthropic 兼容的 API 密钥（Claude、DeepSeek 或 [44 家其他供应商](setup/configure-api.ts)）
 
+> [!NOTE]
+> **Apple Silicon (arm64)：** 除 RASPA3（蒙特卡洛）外，所有计算工具均原生支持。DFT（Quantum ESPRESSO）、MD（LAMMPS）、MLIP（MACE/CHGNet）正常运行。详见[常见问题排查 — RASPA3 arm64](docs/troubleshooting.md#raspa3-not-available-arm64--apple-silicon)。
+
 ### 手动安装
 
 ### 1. 获取容器

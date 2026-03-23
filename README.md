@@ -301,6 +301,9 @@ The interactive wizard guides you through environment check, container setup, AP
 - [Docker](https://docs.docker.com/get-docker/)
 - An Anthropic-compatible API key (Claude, DeepSeek, or [44 other providers](setup/configure-api.ts))
 
+> [!NOTE]
+> **Apple Silicon (arm64):** All computation tools work natively except RASPA3 (Monte Carlo), which has no official arm64 release. DFT (Quantum ESPRESSO), MD (LAMMPS), and MLIP (MACE/CHGNet) work normally. See [Troubleshooting — RASPA3 arm64](docs/troubleshooting.md#raspa3-not-available-arm64--apple-silicon) for details.
+
 ### Manual setup
 
 ### 1. Get the container

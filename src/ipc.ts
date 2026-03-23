@@ -6,6 +6,7 @@ import { CronExpressionParser } from 'cron-parser';
 import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
+import { computeNextRun } from './task-scheduler.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
@@ -98,12 +99,17 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 { file, sourceGroup, err },
                 'Error processing IPC message',
               );
-              const errorDir = path.join(ipcBaseDir, 'errors');
-              fs.mkdirSync(errorDir, { recursive: true });
-              fs.renameSync(
-                filePath,
-                path.join(errorDir, `${sourceGroup}-${file}`),
-              );
+              try {
+                const errorDir = path.join(ipcBaseDir, 'errors');
+                fs.mkdirSync(errorDir, { recursive: true });
+                fs.renameSync(
+                  filePath,
+                  path.join(errorDir, `${sourceGroup}-${file}`),
+                );
+              } catch {
+                // If move fails, delete to prevent infinite retry loop
+                try { fs.unlinkSync(filePath); } catch { /* already gone */ }
+              }
             }
           }
         }
@@ -132,12 +138,17 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 { file, sourceGroup, err },
                 'Error processing IPC task',
               );
-              const errorDir = path.join(ipcBaseDir, 'errors');
-              fs.mkdirSync(errorDir, { recursive: true });
-              fs.renameSync(
-                filePath,
-                path.join(errorDir, `${sourceGroup}-${file}`),
-              );
+              try {
+                const errorDir = path.join(ipcBaseDir, 'errors');
+                fs.mkdirSync(errorDir, { recursive: true });
+                fs.renameSync(
+                  filePath,
+                  path.join(errorDir, `${sourceGroup}-${file}`),
+                );
+              } catch {
+                // If move fails, delete to prevent infinite retry loop
+                try { fs.unlinkSync(filePath); } catch { /* already gone */ }
+              }
             }
           }
         }
@@ -293,7 +304,9 @@ export async function processTaskIpc(
       if (data.taskId) {
         const task = getTaskById(data.taskId);
         if (task && (isMain || task.group_folder === sourceGroup)) {
-          updateTask(data.taskId, { status: 'active' });
+          // Recalculate next_run to avoid immediate fire on tasks paused for a long time
+          const nextRun = computeNextRun(task);
+          updateTask(data.taskId, { status: 'active', next_run: nextRun });
           logger.info(
             { taskId: data.taskId, sourceGroup },
             'Task resumed via IPC',

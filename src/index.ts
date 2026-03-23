@@ -14,6 +14,7 @@ for (const [key, value] of Object.entries(proxyVars)) {
 import {
   ASSISTANT_NAME,
   DATA_DIR,
+  GROUPS_DIR,
   IDLE_TIMEOUT,
   POLL_INTERVAL,
   TRIGGER_PATTERN,
@@ -24,12 +25,20 @@ import {
   getRegisteredChannelNames,
 } from './channels/registry.js';
 import {
+  AgentProfile,
   ContainerOutput,
   runContainerAgent,
   writeGroupsSnapshot,
   writeTasksSnapshot,
 } from './container-runner.js';
 import { startDashboard } from './web/server.js';
+import { agentEvents } from './web/events.js';
+import { startCredentialProxy } from './credential-proxy.js';
+import {
+  CREDENTIAL_PROXY_PORT,
+  INTELLIGENCE_MODULE,
+  PIPELINE_AUTO,
+} from './config.js';
 import {
   cleanupOrphans,
   ensureContainerRuntimeRunning,
@@ -59,6 +68,7 @@ import {
   setActiveWebChatThreadId,
   storeChatMetadata,
   storeMessage,
+  markMessageAsBot,
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
@@ -81,6 +91,7 @@ export { escapeXml, formatMessages } from './router.js';
 let lastTimestamp = '';
 let sessions: Record<string, string> = {};
 let previousSessions: Record<string, string> = {}; // saved before /new, restored by /resume
+let previousPipelineFlags: Record<string, { pipeline_notified?: boolean; modeling_notified?: boolean }> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
@@ -127,8 +138,7 @@ function syncWebChatRuntimeSession(
     sessions[WEB_CHAT_FOLDER] = thread.agent_session_id;
     setSession(WEB_CHAT_FOLDER, thread.agent_session_id);
   } else {
-    delete sessions[WEB_CHAT_FOLDER];
-    deleteSession(WEB_CHAT_FOLDER);
+    clearAllGroupSessions(WEB_CHAT_FOLDER);
   }
 }
 
@@ -140,11 +150,8 @@ function activateWebChatThread(threadId: string): void {
   }
   const state = queue.getState(WEB_CHAT_JID);
   const hasRunningWebAgent = !!(state?.active && state.process);
-  if (state?.active && state.process) {
-    queue.markSessionCleared(WEB_CHAT_JID);
-    state.process.kill('SIGTERM');
-    if (state.containerName) killContainer(state.containerName);
-  }
+  // Don't kill running container — let it finish its current task.
+  // Just switch the active thread so new messages go to the new thread.
   syncWebChatRuntimeSession(threadId, !hasRunningWebAgent);
 }
 
@@ -269,272 +276,31 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   if (missedMessages.length === 0) return true;
 
-  // ── Session control commands ──
+  // Session control commands (/watch, /stop, /new, /mode, /proceed, etc.)
+  // are handled in handleControlCommand() which runs BEFORE processGroupMessages.
+  // Safety fallback: if a control command somehow reaches here, consume it.
   const lastMsg = missedMessages[missedMessages.length - 1].content.trim();
 
-  if (/^\/watch\b/i.test(lastMsg)) {
-    lastAgentTimestamp[cursorKey] =
-      missedMessages[missedMessages.length - 1].timestamp;
-    saveState();
-    // Read tail of container-live.log and extract recent activity
-    const liveLogPath = path.join(
-      DATA_DIR,
-      'groups',
-      group.folder,
-      'logs',
-      'container-live.log',
-    );
-    if (!fs.existsSync(liveLogPath)) {
-      if (channel) await channel.sendMessage(chatJid, 'No agent activity yet.');
-      return true;
-    }
-    const raw = fs.readFileSync(liveLogPath, 'utf-8');
-    const allLines = raw.split('\n');
-    // Take last 200 lines, extract meaningful entries
-    const tail = allLines.slice(-200);
-    const activities: string[] = [];
-    for (const line of tail) {
-      const m = line.match(/\[stderr\]\s*\[[\d:.]+\]\s*(.+)/);
-      if (!m) continue;
-      const content = m[1];
-      if (content.startsWith('[ToolCall]')) {
-        activities.push(content.replace('[ToolCall] ', ''));
-      } else if (content.startsWith('[Assistant]')) {
-        activities.push(
-          'Assistant: ' + content.replace('[Assistant] ', '').slice(0, 100),
-        );
-      } else if (content.startsWith('[Thinking]')) {
-        activities.push('Thinking...');
-      } else if (content.startsWith('[Result')) {
-        activities.push(content.slice(0, 120));
-      }
-    }
-    const state = queue.getState(chatJid);
-    const status = state?.active ? 'Running' : 'Idle';
-    const recent = activities.slice(-10);
-    if (channel) {
-      const msg =
-        recent.length > 0
-          ? `Agent: ${status}\n\nRecent activity:\n${recent.join('\n')}`
-          : `Agent: ${status}\n\nNo recent tool activity.`;
-      await channel.sendMessage(chatJid, msg);
-    }
-    return true;
-  }
-
-  if (/^\/help\b/i.test(lastMsg)) {
-    lastAgentTimestamp[cursorKey] =
-      missedMessages[missedMessages.length - 1].timestamp;
-    saveState();
-    if (channel) {
-      await channel.sendMessage(
-        chatJid,
-        [
-          'Commands:',
-          '/watch — see what agent is doing right now',
-          '/status — agent status (running/idle, session, queue)',
-          '/stop — force stop running agent',
-          '/sessions — list all sessions',
-          '/new — start fresh conversation',
-          '/resume [id] — restore previous or specific session',
-          '/compact [focus] — compress agent memory',
-          '/help — this message',
-        ].join('\n'),
-      );
-    }
-    return true;
-  }
-
-  if (/^\/stop\b/i.test(lastMsg)) {
-    lastAgentTimestamp[cursorKey] =
-      missedMessages[missedMessages.length - 1].timestamp;
-    saveState();
-    const state = queue.getState(chatJid);
-    if (state?.active && state.process) {
-      state.process.kill('SIGTERM');
-      if (state.containerName) killContainer(state.containerName);
-      logger.info({ group: group.name }, 'Agent stopped via /stop command');
-      if (channel) {
-        await channel.sendMessage(chatJid, 'Agent stopped.');
-      }
-    } else {
-      if (channel) {
-        await channel.sendMessage(chatJid, 'No agent running.');
-      }
-    }
-    return true;
-  }
-
-  if (/^\/status\b/i.test(lastMsg)) {
-    lastAgentTimestamp[cursorKey] =
-      missedMessages[missedMessages.length - 1].timestamp;
-    saveState();
-    const state = queue.getState(chatJid);
-    const sid = sessions[group.folder];
-    const parts: string[] = [];
-    parts.push(`Group: ${group.name} (${group.folder})`);
-    parts.push(
-      `Agent: ${state?.active ? 'running' : 'idle'}${state?.containerName ? ` (${state.containerName})` : ''}`,
-    );
-    parts.push(`Session: ${sid ? sid.slice(0, 8) + '...' : 'none'}`);
-    if (state?.pendingTasks.length) {
-      parts.push(`Queued tasks: ${state.pendingTasks.length}`);
-    }
-    if (channel) {
-      await channel.sendMessage(chatJid, parts.join('\n'));
-    }
-    return true;
-  }
-
-  if (/^\/sessions\b/i.test(lastMsg)) {
-    // List available sessions for this group
-    const transcriptDir = path.join(
-      DATA_DIR,
-      'sessions',
-      group.folder,
-      '.claude',
-      'projects',
-      '-workspace-group',
-    );
-    let lines: string[] = [];
-    const currentId = sessions[group.folder];
-    if (fs.existsSync(transcriptDir)) {
-      const files = fs
-        .readdirSync(transcriptDir)
-        .filter((f) => f.endsWith('.jsonl'))
-        .map((f) => {
-          const stat = fs.statSync(path.join(transcriptDir, f));
-          const id = f.replace('.jsonl', '');
-          return { id, size: stat.size, modified: stat.mtime };
-        })
-        .sort((a, b) => b.modified.getTime() - a.modified.getTime());
-      for (const s of files) {
-        const kb = Math.round(s.size / 1024);
-        const time = s.modified.toISOString().slice(0, 16).replace('T', ' ');
-        const marker = s.id === currentId ? ' [active]' : '';
-        lines.push(`${s.id.slice(0, 8)}  ${time}  ${kb}KB${marker}`);
-      }
-    }
-    lastAgentTimestamp[cursorKey] =
-      missedMessages[missedMessages.length - 1].timestamp;
-    saveState();
-    if (channel) {
-      const msg =
-        lines.length > 0
-          ? `Sessions:\n${lines.join('\n')}\n\nUse /resume <id prefix> to switch.`
-          : 'No sessions found.';
-      await channel.sendMessage(chatJid, msg);
-    }
-    return true;
-  }
-
-  if (/^\/new\b/i.test(lastMsg)) {
-    // Save current session so /resume can restore it
-    if (sessions[group.folder]) {
-      previousSessions[group.folder] = sessions[group.folder];
-    }
-    queue.markSessionCleared(chatJid);
-    delete sessions[group.folder];
-    deleteSession(group.folder);
-    lastAgentTimestamp[cursorKey] =
-      missedMessages[missedMessages.length - 1].timestamp;
-    saveState();
-    logger.info({ group: group.name }, 'Session reset via /new command');
-    if (channel) {
-      await channel.sendMessage(
-        chatJid,
-        'Session cleared. Next message starts a fresh conversation. Use /resume to restore the previous session.',
-      );
-    }
-    return true;
-  }
-
-  if (/^\/resume\b/i.test(lastMsg)) {
-    const arg = lastMsg.replace(/^\/resume\s*/i, '').trim();
-    let targetId: string | undefined;
-
-    if (arg) {
-      // Find session by ID prefix
-      const transcriptDir = path.join(
-        DATA_DIR,
-        'sessions',
-        group.folder,
-        '.claude',
-        'projects',
-        '-workspace-group',
-      );
-      if (fs.existsSync(transcriptDir)) {
-        const match = fs
-          .readdirSync(transcriptDir)
-          .filter((f) => f.endsWith('.jsonl') && f.startsWith(arg))
-          .map((f) => f.replace('.jsonl', ''));
-        if (match.length === 1) {
-          targetId = match[0];
-        } else if (match.length > 1) {
-          lastAgentTimestamp[cursorKey] =
-            missedMessages[missedMessages.length - 1].timestamp;
-          saveState();
-          if (channel) {
-            await channel.sendMessage(
-              chatJid,
-              `Ambiguous prefix "${arg}", matches: ${match.map((m) => m.slice(0, 8)).join(', ')}. Be more specific.`,
-            );
-          }
-          return true;
-        }
-      }
-    } else {
-      // No argument — restore the session saved by /new
-      targetId = previousSessions[group.folder];
-    }
-
-    if (targetId) {
-      if (sessions[group.folder]) {
-        previousSessions[group.folder] = sessions[group.folder];
-      }
-      sessions[group.folder] = targetId;
-      setSession(group.folder, targetId);
-      lastAgentTimestamp[cursorKey] =
-        missedMessages[missedMessages.length - 1].timestamp;
-      saveState();
-      logger.info(
-        { group: group.name, sessionId: targetId },
-        'Session restored via /resume',
-      );
-      if (channel) {
-        await channel.sendMessage(
-          chatJid,
-          `Session restored (${targetId.slice(0, 8)}...). Agent will continue with that session's history.`,
-        );
-      }
-    } else {
-      lastAgentTimestamp[cursorKey] =
-        missedMessages[missedMessages.length - 1].timestamp;
-      saveState();
-      if (channel) {
-        await channel.sendMessage(
-          chatJid,
-          'No session found. Use /sessions to list available sessions.',
-        );
-      }
-    }
-    return true;
-  }
-
+  // /compact is special: rewrite the message content but don't return (let it flow to agent)
   if (/^\/compact\b/i.test(lastMsg)) {
-    // Extract optional focus argument: /compact 保留飞书相关的记忆
     const focus = lastMsg.replace(/^\/compact\s*/i, '').trim();
-    let compactPrompt: string;
-    if (focus) {
-      compactPrompt = `[SYSTEM] Compress and reorganize your current memory. Focus on: ${focus}. Discard everything not related to this focus. Summarize what you kept.`;
-    } else {
-      compactPrompt =
-        '[SYSTEM] Summarize your current memory and context into a concise form. Forget unnecessary details, keep only the key facts, decisions, and ongoing tasks. After summarizing, confirm what you remember.';
-    }
     missedMessages[missedMessages.length - 1] = {
       ...missedMessages[missedMessages.length - 1],
-      content: compactPrompt,
+      content: focus
+        ? `[SYSTEM] Compress and reorganize your current memory. Focus on: ${focus}. Discard everything not related to this focus. Summarize what you kept.`
+        : '[SYSTEM] Summarize your current memory and context into a concise form. Forget unnecessary details, keep only the key facts, decisions, and ongoing tasks. After summarizing, confirm what you remember.',
     };
+  } else if (
+    /^\/(watch|help|stop|status|sessions|new|resume|mode|proceed)\b/i.test(
+      lastMsg,
+    )
+  ) {
+    // Safety fallback: these commands should have been handled by handleControlCommand().
+    // If they somehow reach here, consume them to prevent sending to the agent.
+    lastAgentTimestamp[cursorKey] =
+      missedMessages[missedMessages.length - 1].timestamp;
+    saveState();
+    return true;
   }
 
   // For non-main groups, check if trigger is required and present
@@ -633,14 +399,204 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   return true;
 }
 
+/**
+ * Get the current operating mode.
+ * Respects runtime override from interactive toggle.
+ */
+type OperatingMode =
+  | 'compute'
+  | 'intelligence'
+  | 'modeling'
+  | 'modeling+compute'
+  | 'intelligence+compute';
+
+function getOperatingMode(group?: RegisteredGroup): OperatingMode {
+  // Per-group override takes priority (set by /mode in that group)
+  const groupMode = group?.containerConfig?.mode;
+  if (
+    groupMode === 'intelligence' ||
+    groupMode === 'intelligence+compute' ||
+    groupMode === 'modeling' ||
+    groupMode === 'modeling+compute' ||
+    groupMode === 'compute'
+  )
+    return groupMode;
+
+  // Fall back to global .env setting
+  const freshConfig = readEnvFile(['INTELLIGENCE_MODE']);
+  const mode = freshConfig.INTELLIGENCE_MODE;
+  if (
+    mode === 'intelligence' ||
+    mode === 'intelligence+compute' ||
+    mode === 'modeling' ||
+    mode === 'modeling+compute'
+  )
+    return mode;
+  const intellEnabled =
+    (globalThis as any).__INTELLIGENCE_MODULE_OVERRIDE ?? INTELLIGENCE_MODULE;
+  return intellEnabled ? 'intelligence+compute' : 'compute';
+}
+
+/**
+ * Determine the agent profile for a given run.
+ * In pipeline mode (intelligence+compute), returns 'intelligence' for phase 1.
+ */
+
+/**
+ * Pipeline state per group — tracks which files the current run produced.
+ * Stored at groups/{folder}/.pipeline_state.json.
+ * Each session's agent writes its output files; the host records the paths here.
+ * When user switches sessions or /proceed, we know exactly which files to use.
+ */
+interface PipelineState {
+  research_decision?: string; // host path to research_decision.json
+  computation_plan?: string; // host path to computation_plan.json
+  report_dir?: string; // host path to the run directory
+  updated_at?: string;
+}
+
+function getPipelineStatePath(groupFolder: string): string {
+  return path.join(resolveGroupFolderPath(groupFolder), '.pipeline_state.json');
+}
+
+function readPipelineState(groupFolder: string): PipelineState {
+  const statePath = getPipelineStatePath(groupFolder);
+  try {
+    if (fs.existsSync(statePath)) {
+      return JSON.parse(fs.readFileSync(statePath, 'utf-8'));
+    }
+  } catch {
+    /* corrupt file */
+  }
+  return {};
+}
+
+function writePipelineState(groupFolder: string, state: PipelineState): void {
+  state.updated_at = new Date().toISOString();
+  const statePath = getPipelineStatePath(groupFolder);
+  fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
+}
+
+function clearPipelineState(groupFolder: string): void {
+  const statePath = getPipelineStatePath(groupFolder);
+  try {
+    fs.unlinkSync(statePath);
+  } catch {
+    /* doesn't exist */
+  }
+}
+
+/**
+ * Scan a group directory for a pipeline output file.
+ * First checks pipeline_state.json for recorded path.
+ * Falls back to searching the group directory recursively.
+ */
+function findPipelineFile(
+  groupFolder: string,
+  filename: string,
+): string | null {
+  // Priority 1: recorded in pipeline state
+  const state = readPipelineState(groupFolder);
+  const key =
+    filename === 'research_decision.json'
+      ? 'research_decision'
+      : 'computation_plan';
+  const recorded = state[key as keyof PipelineState] as string | undefined;
+  if (recorded && fs.existsSync(recorded)) return recorded;
+
+  // Priority 2: search group directory
+  const groupDir = resolveGroupFolderPath(groupFolder);
+  const results: { path: string; mtime: number }[] = [];
+
+  function walk(dir: string, depth: number) {
+    if (depth > 3) return;
+    try {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory() && !entry.name.startsWith('.')) {
+          walk(fullPath, depth + 1);
+        } else if (entry.isFile() && entry.name === filename) {
+          const stat = fs.statSync(fullPath);
+          results.push({ path: fullPath, mtime: stat.mtimeMs });
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  walk(groupDir, 0);
+  if (results.length === 0) return null;
+  results.sort((a, b) => b.mtime - a.mtime);
+
+  // Record it for next time
+  const found = results[0].path;
+  state[key as keyof PipelineState] = found as any;
+  writePipelineState(groupFolder, state);
+
+  return found;
+}
+
+function getAgentProfile(): AgentProfile {
+  const mode = getOperatingMode();
+  if (mode === 'intelligence') return 'intelligence';
+  if (mode === 'compute') return 'compute';
+  // intelligence+compute: default to intelligence for first run
+  // (pipeline logic in runAgent handles the handoff)
+  return null; // null = all skills (for non-pipeline runs)
+}
+
+/**
+ * Get the session storage key for a given group + profile combination.
+ * In pipeline mode, each profile gets its own session namespace.
+ */
+function sessionKey(groupFolder: string, profile: AgentProfile): string {
+  if (profile) return `${groupFolder}:${profile}`;
+  return groupFolder;
+}
+
+/** Clear all session keys for a group, including profile-scoped ones and pipeline state. */
+function clearAllGroupSessions(groupFolder: string): void {
+  clearPipelineState(groupFolder);
+  const profiles: AgentProfile[] = ['intelligence', 'modeling', 'compute'];
+  // Clear base session
+  delete sessions[groupFolder];
+  deleteSession(groupFolder);
+  // Clear all profile-scoped sessions
+  for (const p of profiles) {
+    const key = `${groupFolder}:${p}`;
+    delete sessions[key];
+    deleteSession(key);
+  }
+  // Clear pipeline notification flags
+  delete (globalThis as any)[`${groupFolder}:pipeline_notified`];
+  delete (globalThis as any)[`${groupFolder}:modeling_notified`];
+}
+
 async function runAgent(
   group: RegisteredGroup,
   prompt: string,
   chatJid: string,
   onOutput?: (output: ContainerOutput) => Promise<void>,
+  profileOverride?: AgentProfile,
 ): Promise<'success' | 'error'> {
   const isMain = group.isMain === true;
-  const sessionId = sessions[group.folder];
+  const mode = getOperatingMode(group);
+  const profileMap: Record<string, AgentProfile> = {
+    intelligence: 'intelligence',
+    compute: 'compute',
+    modeling: 'modeling',
+  };
+  const profile = profileOverride ?? profileMap[mode] ?? null;
+  // Pipeline modes: start with the first agent in the chain
+  const effectiveProfile =
+    mode === 'intelligence+compute' && !profileOverride
+      ? ('intelligence' as AgentProfile)
+      : mode === 'modeling+compute' && !profileOverride
+        ? ('modeling' as AgentProfile)
+        : profile;
+  const sKey = sessionKey(group.folder, effectiveProfile);
+  const sessionId = sessions[sKey] || sessions[group.folder];
 
   // Update tasks snapshot for container to read (filtered by group)
   const tasks = getAllTasks();
@@ -667,58 +623,459 @@ async function runAgent(
     new Set(Object.keys(registeredGroups)),
   );
 
+  // Capture the thread ID at start — don't use getActiveWebChatThreadId() later
+  // because the user may switch threads while the agent is still running.
+  const startingThreadId =
+    group.folder === WEB_CHAT_FOLDER ? getActiveWebChatThreadId() : null;
+
   // Wrap onOutput to track session ID from streamed results.
-  // Skip saving if /new cleared the session (dying container's output
-  // must not re-save the old session ID).
-  const wrappedOnOutput = onOutput
-    ? async (output: ContainerOutput) => {
-        if (output.newSessionId && !queue.isSessionCleared(chatJid)) {
-          sessions[group.folder] = output.newSessionId;
-          setSession(group.folder, output.newSessionId);
-          if (group.folder === WEB_CHAT_FOLDER) {
-            assignWebChatThreadSession(
-              getActiveWebChatThreadId(),
-              output.newSessionId,
-            );
+  const makeWrappedOnOutput = (phaseKey: string) =>
+    onOutput
+      ? async (output: ContainerOutput) => {
+          if (output.newSessionId && !queue.isSessionCleared(chatJid)) {
+            sessions[phaseKey] = output.newSessionId;
+            setSession(phaseKey, output.newSessionId);
+            if (startingThreadId) {
+              assignWebChatThreadSession(
+                startingThreadId,
+                output.newSessionId,
+              );
+            }
           }
+          await onOutput(output);
         }
-        await onOutput(output);
-      }
-    : undefined;
+      : undefined;
+  const wrappedOnOutput = makeWrappedOnOutput(sKey);
 
   try {
-    const output = await runContainerAgent(
-      group,
-      {
-        prompt,
-        sessionId,
-        groupFolder: group.folder,
-        chatJid,
-        isMain,
-        assistantName: ASSISTANT_NAME,
-      },
-      (proc, containerName) =>
-        queue.registerProcess(chatJid, proc, containerName, group.folder),
-      wrappedOnOutput,
-    );
+    // /proceed command sets __PIPELINE_FORCE_COMPUTE to skip re-running Phase 1.
+    // Phase 1 already ran and produced its output file; the pipeline handoff
+    // code below constructs proper prompts for subsequent phases.
+    const forceKey = `${group.folder}:__PIPELINE_FORCE_COMPUTE`;
+    const forceCompute = (globalThis as any)[forceKey];
+    if (forceCompute) delete (globalThis as any)[forceKey];
 
-    if (output.newSessionId && !queue.isSessionCleared(chatJid)) {
-      sessions[group.folder] = output.newSessionId;
-      setSession(group.folder, output.newSessionId);
-      if (group.folder === WEB_CHAT_FOLDER) {
-        assignWebChatThreadSession(
-          getActiveWebChatThreadId(),
-          output.newSessionId,
+    // Helper: check if /stop was issued during a pipeline phase transition
+    const cancelledKey = `${group.folder}:__PIPELINE_CANCELLED`;
+    const isPipelineCancelled = () => {
+      if ((globalThis as any)[cancelledKey]) {
+        delete (globalThis as any)[cancelledKey];
+        logger.info({ group: group.name }, 'Pipeline cancelled by /stop');
+        return true;
+      }
+      return false;
+    };
+
+    // Skip Phase 1 when /proceed forces the pipeline forward —
+    // Phase 1 already ran and produced its pipeline file.
+    const skipPhase1 =
+      forceCompute &&
+      !profileOverride &&
+      (mode === 'intelligence+compute' || mode === 'modeling+compute');
+
+    if (!skipPhase1) {
+      // ── Phase 1: Run the primary agent ──
+      const output = await runContainerAgent(
+        group,
+        {
+          prompt,
+          sessionId,
+          groupFolder: group.folder,
+          chatJid,
+          isMain,
+          assistantName: ASSISTANT_NAME,
+        },
+        (proc, containerName) =>
+          queue.registerProcess(chatJid, proc, containerName, group.folder),
+        wrappedOnOutput,
+        effectiveProfile,
+      );
+
+      if (output.newSessionId && !queue.isSessionCleared(chatJid)) {
+        sessions[sKey] = output.newSessionId;
+        setSession(sKey, output.newSessionId);
+        if (startingThreadId) {
+          assignWebChatThreadSession(startingThreadId, output.newSessionId);
+        }
+        logger.debug(
+          { sessionKey: sKey, sessionId: output.newSessionId },
+          'Session saved',
+        );
+      }
+
+      if (output.status === 'error') {
+        logger.error(
+          { group: group.name, error: output.error },
+          'Container agent error',
+        );
+        return 'error';
+      }
+    }
+
+    if (mode === 'intelligence+compute' && !profileOverride) {
+      const groupDir = resolveGroupFolderPath(group.folder);
+      const decisionPath = findPipelineFile(
+        group.folder,
+        'research_decision.json',
+      );
+
+      // Track whether we've already notified the user about the decision.
+      // This prevents re-showing the /proceed prompt on every follow-up message
+      // while the user is still refining the intelligence analysis.
+      const notifiedKey = `${group.folder}:pipeline_notified`;
+      const decisionExists = !!decisionPath;
+      const alreadyNotified = (globalThis as any)[notifiedKey];
+
+      if (decisionExists && !alreadyNotified) {
+        const shouldAutoRun = PIPELINE_AUTO || forceCompute;
+
+        // Mark as notified so follow-up messages don't re-trigger
+        (globalThis as any)[notifiedKey] = true;
+
+        if (!shouldAutoRun) {
+          // Manual mode: notify user, wait for /proceed
+          // User can continue chatting with intelligence agent to refine
+          logger.info(
+            { group: group.name },
+            'Pipeline: intelligence phase complete, waiting for user /proceed',
+          );
+          const channel = findChannel(channels, chatJid);
+          if (channel) {
+            await channel.sendMessage(
+              chatJid,
+              [
+                'Research decision generated.',
+                '',
+                'You can continue chatting to refine the analysis, or:',
+                '/proceed — start computation based on research decision',
+                '/mode compute — switch to computation only',
+              ].join('\n'),
+            );
+          }
+          return 'success';
+        }
+
+        logger.info(
+          { group: group.name },
+          'Pipeline: intelligence complete, starting modeling phase',
+        );
+
+        const channel = findChannel(channels, chatJid);
+
+        // Check if /stop was issued between phases
+        if (isPipelineCancelled()) return 'error';
+
+        // ── Phase 2: Modeling Agent ──
+        // Reads research_decision.json → designs physical model + computational approach
+        // Outputs computation_plan.json
+        if (channel) {
+          await channel.sendMessage(
+            chatJid,
+            'Starting scientific modeling phase — designing computational approach...',
+          );
+        }
+
+        const decision = JSON.parse(fs.readFileSync(decisionPath, 'utf-8'));
+        const topicTitle = Array.isArray(decision)
+          ? decision[0]?.title || 'See file'
+          : decision.title || 'See file';
+
+        // Convert host path to container path
+        const containerDecisionPath = decisionPath!.replace(
+          groupDir,
+          '/workspace/group',
+        );
+
+        const modelingPrompt = [
+          '[SYSTEM] Pipeline handoff: Intelligence → Modeling.',
+          '',
+          'A research direction has been decided. Read:',
+          containerDecisionPath,
+          '',
+          'Your task: Design the complete computational approach.',
+          'Follow the workflow in your modeling SKILL.md:',
+          '1. Understand the physical problem',
+          '2. Research the physics (use WebSearch)',
+          '3. Select physical model and mathematical framework',
+          '4. Choose computational methods (DFT/MLIP/MD/MC)',
+          '5. Determine ALL parameters with justification',
+          '6. Design convergence tests',
+          '7. Design validation strategy',
+          '8. Write computation_plan.json',
+          '',
+          `Topic: ${topicTitle}`,
+        ].join('\n');
+
+        const modelingKey = sessionKey(group.folder, 'modeling');
+        const modelingResult = await runContainerAgent(
+          group,
+          {
+            prompt: modelingPrompt,
+            sessionId: sessions[modelingKey],
+            groupFolder: group.folder,
+            chatJid,
+            isMain,
+            assistantName: ASSISTANT_NAME,
+          },
+          (proc, containerName) =>
+            queue.registerProcess(chatJid, proc, containerName, group.folder),
+          makeWrappedOnOutput(modelingKey),
+          'modeling',
+        );
+
+        if (modelingResult.newSessionId && !queue.isSessionCleared(chatJid)) {
+          sessions[modelingKey] = modelingResult.newSessionId;
+          setSession(modelingKey, modelingResult.newSessionId);
+        }
+
+        if (modelingResult.status === 'error') {
+          logger.error(
+            { group: group.name },
+            'Pipeline: modeling phase failed',
+          );
+          // Reset pipeline_notified so a new message can re-trigger the pipeline
+          delete (globalThis as any)[notifiedKey];
+          return 'error';
+        }
+
+        // Check if modeling produced computation_plan.json
+        const planPath = findPipelineFile(
+          group.folder,
+          'computation_plan.json',
+        );
+        const modelingNotifiedKey = `${group.folder}:modeling_notified`;
+
+        if (!(globalThis as any)[modelingNotifiedKey]) {
+          (globalThis as any)[modelingNotifiedKey] = true;
+
+          if (!PIPELINE_AUTO && !forceCompute) {
+            // Manual mode: pause for user review
+            logger.info(
+              { group: group.name },
+              'Pipeline: modeling complete, waiting for user /proceed',
+            );
+            if (channel) {
+              const hasPlanMsg = planPath
+                ? 'Computation plan generated.'
+                : 'No computation_plan.json yet.';
+              await channel.sendMessage(
+                chatJid,
+                [
+                  `Modeling phase complete. ${hasPlanMsg}`,
+                  '',
+                  'You can continue chatting to refine, or:',
+                  '/proceed — start computation',
+                ].join('\n'),
+              );
+            }
+            return 'success';
+          }
+        } else if (!planPath) {
+          logger.info(
+            { group: group.name },
+            'Pipeline: no computation_plan.json, stopping',
+          );
+          if (channel) {
+            await channel.sendMessage(
+              chatJid,
+              'Modeling complete but no computation plan generated.',
+            );
+          }
+          return 'success';
+        }
+
+        // ── Phase 3: Compute Agent ──
+        if (isPipelineCancelled()) return 'error';
+        if (!planPath) {
+          logger.info(
+            { group: group.name },
+            'Pipeline: no computation_plan.json after modeling, stopping',
+          );
+          if (channel) {
+            await channel.sendMessage(
+              chatJid,
+              'Modeling complete but no computation plan generated. Use /proceed after the plan is ready.',
+            );
+          }
+          return 'success';
+        }
+
+        if (channel) {
+          await channel.sendMessage(chatJid, 'Starting computation phase...');
+        }
+
+        const containerPlanPath = planPath.replace(
+          groupDir,
+          '/workspace/group',
+        );
+
+        const computePrompt = [
+          '[SYSTEM] Pipeline handoff: Modeling → Computation.',
+          '',
+          'A computational plan has been designed. Read:',
+          containerPlanPath,
+          '',
+          'Execute the calculations as specified in the plan.',
+          'Follow the parameters, convergence tests, and validation strategy exactly.',
+          '',
+          `Topic: ${topicTitle}`,
+        ].join('\n');
+
+        // Reset notification flags for next pipeline run
+        delete (globalThis as any)[modelingNotifiedKey];
+
+        const computeKey = sessionKey(group.folder, 'compute');
+        const computeResult = await runContainerAgent(
+          group,
+          {
+            prompt: computePrompt,
+            sessionId: sessions[computeKey],
+            groupFolder: group.folder,
+            chatJid,
+            isMain,
+            assistantName: ASSISTANT_NAME,
+          },
+          (proc, containerName) =>
+            queue.registerProcess(chatJid, proc, containerName, group.folder),
+          makeWrappedOnOutput(computeKey),
+          'compute',
+        );
+        if (computeResult.newSessionId && !queue.isSessionCleared(chatJid)) {
+          sessions[computeKey] = computeResult.newSessionId;
+          setSession(computeKey, computeResult.newSessionId);
+          logger.debug(
+            { sessionKey: computeKey, sessionId: computeResult.newSessionId },
+            'Compute session saved',
+          );
+        }
+
+        // Reset pipeline_notified so next user message can trigger a fresh pipeline
+        delete (globalThis as any)[notifiedKey];
+
+        if (computeResult.status === 'error') {
+          logger.error({ group: group.name }, 'Pipeline: compute phase failed');
+          return 'error';
+        } else {
+          logger.info(
+            { group: group.name },
+            'Pipeline: compute phase complete',
+          );
+        }
+      } else {
+        logger.debug(
+          { group: group.name },
+          'Pipeline: no research_decision.json found, skipping compute phase',
         );
       }
     }
 
-    if (output.status === 'error') {
-      logger.error(
-        { group: group.name, error: output.error },
-        'Container agent error',
-      );
-      return 'error';
+    // ── modeling+compute pipeline ──
+    // After modeling phase, ALWAYS pause for user review (unless auto/force).
+    // This ensures modeling and compute are truly decoupled — user decides when to proceed.
+    if (mode === 'modeling+compute' && !profileOverride) {
+      const groupDir = resolveGroupFolderPath(group.folder);
+      const planPath = findPipelineFile(group.folder, 'computation_plan.json');
+      const modelingNotifiedKey = `${group.folder}:modeling_notified`;
+
+      if (!(globalThis as any)[modelingNotifiedKey]) {
+        (globalThis as any)[modelingNotifiedKey] = true;
+
+        if (!PIPELINE_AUTO && !forceCompute) {
+          logger.info(
+            { group: group.name },
+            'Pipeline: modeling phase complete, waiting for /proceed',
+          );
+          const channel = findChannel(channels, chatJid);
+          if (channel) {
+            const hasplan = planPath
+              ? 'computation_plan.json generated.'
+              : 'No computation_plan.json yet.';
+            await channel.sendMessage(
+              chatJid,
+              [
+                `Modeling phase complete. ${hasplan}`,
+                '',
+                'You can continue chatting to refine the modeling, or:',
+                '/proceed — start computation',
+              ].join('\n'),
+            );
+          }
+          return 'success';
+        }
+
+        // Auto mode: proceed to compute
+        if (!planPath) {
+          logger.info(
+            { group: group.name },
+            'Pipeline: no computation_plan.json after modeling, stopping',
+          );
+          const ch = findChannel(channels, chatJid);
+          if (ch) {
+            await ch.sendMessage(
+              chatJid,
+              'Modeling complete but no computation plan generated. Use /proceed after the plan is ready.',
+            );
+          }
+          return 'success';
+        }
+
+        if (isPipelineCancelled()) return 'error';
+
+        const channel = findChannel(channels, chatJid);
+        if (channel) {
+          await channel.sendMessage(chatJid, 'Starting computation phase...');
+        }
+
+        delete (globalThis as any)[modelingNotifiedKey];
+
+        const containerPlanPath = planPath.replace(
+          groupDir,
+          '/workspace/group',
+        );
+
+        const computePrompt = [
+          '[SYSTEM] Pipeline handoff: Modeling → Computation.',
+          '',
+          'A computational plan has been designed. Read:',
+          containerPlanPath,
+          '',
+          'Execute the calculations as specified in the plan.',
+          'Follow the parameters, convergence tests, and validation strategy exactly.',
+        ].join('\n');
+
+        const computeKey = sessionKey(group.folder, 'compute');
+        const computeResult = await runContainerAgent(
+          group,
+          {
+            prompt: computePrompt,
+            sessionId: sessions[computeKey],
+            groupFolder: group.folder,
+            chatJid,
+            isMain,
+            assistantName: ASSISTANT_NAME,
+          },
+          (proc, containerName) =>
+            queue.registerProcess(chatJid, proc, containerName, group.folder),
+          makeWrappedOnOutput(computeKey),
+          'compute',
+        );
+
+        if (computeResult.newSessionId && !queue.isSessionCleared(chatJid)) {
+          sessions[computeKey] = computeResult.newSessionId;
+          setSession(computeKey, computeResult.newSessionId);
+        }
+
+        // Reset modeling_notified so next pipeline run can trigger compute
+        delete (globalThis as any)[modelingNotifiedKey];
+
+        if (computeResult.status === 'error') {
+          logger.error(
+            { group: group.name },
+            'Pipeline: compute phase failed (modeling+compute)',
+          );
+          return 'error';
+        }
+      }
     }
 
     return 'success';
@@ -746,13 +1103,231 @@ async function handleControlCommand(
   const cursorKey = getAgentCursorKey(chatJid, threadId);
   const lastMsg = messages[messages.length - 1].content.trim();
 
-  if (/^\/stop\b/i.test(lastMsg)) {
-    lastAgentTimestamp[cursorKey] = messages[messages.length - 1].timestamp;
+  // Helper: consume the command without losing earlier messages in the batch.
+  // Mark the command as a bot message (so getMessagesSince filters it out),
+  // then re-enqueue if there were earlier non-command messages.
+  const consumeCommand = () => {
+    const cmdMsg = messages[messages.length - 1];
+    // Mark command as bot message so it won't be re-fetched by getMessagesSince
+    markMessageAsBot(cmdMsg.id);
+    if (messages.length > 1) {
+      // Don't advance cursor — earlier messages are still fetchable.
+      // The command itself is now filtered by is_bot_message = 0 in queries.
+      queue.enqueueMessageCheck(chatJid);
+    } else {
+      // Only the command in the batch — advance cursor past it
+      lastAgentTimestamp[cursorKey] = cmdMsg.timestamp;
+      saveState();
+    }
+  };
+
+  // ── /mode — switch operating mode ──
+  if (/^\/mode\b/i.test(lastMsg)) {
+    consumeCommand();
+    const arg = lastMsg
+      .replace(/^\/mode\s*/i, '')
+      .trim()
+      .toLowerCase();
+
+    const validModes: Record<string, string> = {
+      compute: 'compute',
+      computation: 'compute',
+      calc: 'compute',
+      intelligence: 'intelligence',
+      intel: 'intelligence',
+      research: 'intelligence',
+      modeling: 'modeling',
+      model: 'modeling',
+      design: 'modeling',
+      'modeling+compute': 'modeling+compute',
+      mc: 'modeling+compute',
+      auto: 'intelligence+compute',
+      pipeline: 'intelligence+compute',
+      'intelligence+compute': 'intelligence+compute',
+      full: 'intelligence+compute',
+    };
+
+    if (!arg) {
+      const current = getOperatingMode(group);
+      const modeLabels: Record<string, string> = {
+        compute: 'Compute',
+        intelligence: 'Intelligence',
+        modeling: 'Modeling',
+        'modeling+compute': 'Modeling → Compute',
+        'intelligence+compute': 'Autonomous Research',
+      };
+      await channel.sendMessage(
+        chatJid,
+        [
+          `Current mode: ${modeLabels[current] || current}`,
+          '',
+          'Available modes:',
+          '/mode compute — DFT, MD, MLIP calculations',
+          '/mode intelligence — research direction analysis',
+          '/mode modeling — physical/mathematical modeling',
+          '/mode mc — modeling → computation',
+          '/mode auto — autonomous research (intelligence → modeling → computation)',
+        ].join('\n'),
+      );
+      return true;
+    }
+
+    const newMode = validModes[arg];
+    if (!newMode) {
+      await channel.sendMessage(
+        chatJid,
+        `Unknown mode "${arg}". Use: compute, intelligence, or auto`,
+      );
+      return true;
+    }
+
+    // Write to .env
+    const envPath = path.join(process.cwd(), '.env');
+    let envContent = '';
+    try {
+      envContent = fs.readFileSync(envPath, 'utf-8');
+    } catch {
+      /* */
+    }
+
+    const enableIntel = newMode !== 'compute';
+    const updates: Record<string, string> = {
+      INTELLIGENCE_MODULE: String(enableIntel),
+      INTELLIGENCE_MODE: newMode,
+    };
+    for (const [key, val] of Object.entries(updates)) {
+      if (new RegExp(`^${key}=`, 'm').test(envContent)) {
+        envContent = envContent.replace(
+          new RegExp(`^${key}=\\S*`, 'm'),
+          `${key}=${val}`,
+        );
+      } else {
+        envContent += `\n${key}=${val}`;
+      }
+    }
+    fs.writeFileSync(envPath, envContent);
+    (globalThis as any).__INTELLIGENCE_MODULE_OVERRIDE = enableIntel;
+
+    // Set per-group mode override so this only affects this group
+    if (!group.containerConfig) group.containerConfig = {};
+    group.containerConfig.mode = newMode;
+    registeredGroups[chatJid] = group;
+    // Clear pipeline flags from previous mode to prevent stale state
+    delete (globalThis as any)[`${group.folder}:pipeline_notified`];
+    delete (globalThis as any)[`${group.folder}:modeling_notified`];
+    delete (globalThis as any)[`${group.folder}:__PIPELINE_CANCELLED`];
     saveState();
+
+    const modeLabels: Record<string, string> = {
+      compute: 'Compute',
+      intelligence: 'Intelligence',
+      modeling: 'Modeling',
+      'modeling+compute': 'Modeling → Compute',
+      'intelligence+compute': 'Autonomous Research',
+    };
+    await channel.sendMessage(
+      chatJid,
+      `Mode switched to: ${modeLabels[newMode] || newMode}. Saved to .env.`,
+    );
+    // Broadcast mode change to dashboard
+    agentEvents.emit('agent', {
+      type: 'status',
+      group: group.name,
+      groupFolder: group.folder,
+      timestamp: new Date().toISOString(),
+      data: { mode: newMode, label: modeLabels[newMode] || newMode },
+    });
+    return true;
+  }
+
+  // ── /proceed — continue pipeline to next phase ──
+  // Smart detection: checks what exists to determine next step
+  //   research_decision.json exists, no computation_plan.json → proceed to modeling
+  //   computation_plan.json exists → proceed to computation
+  if (/^\/proceed\b/i.test(lastMsg)) {
+    consumeCommand();
+
+    // Stop any running agent before proceeding to next phase
     const state = queue.getState(chatJid);
     if (state?.active && state.process) {
       state.process.kill('SIGTERM');
       if (state.containerName) killContainer(state.containerName);
+      logger.info({ group: group.name }, 'Agent stopped for /proceed');
+    }
+
+    const groupDir = resolveGroupFolderPath(group.folder);
+    const decisionPath = findPipelineFile(
+      group.folder,
+      'research_decision.json',
+    );
+    const planPath = findPipelineFile(group.folder, 'computation_plan.json');
+
+    const hasDecision = !!decisionPath;
+    const hasPlan = !!planPath;
+
+    if (!hasDecision && !hasPlan) {
+      await channel.sendMessage(
+        chatJid,
+        'Nothing to proceed with. Run /mode intelligence or /mode modeling first.',
+      );
+      return true;
+    }
+
+    // Determine next phase
+    let nextPhase: 'modeling' | 'compute';
+    if (hasPlan) {
+      // computation_plan.json exists → proceed to computation
+      nextPhase = 'compute';
+    } else {
+      // only research_decision.json → proceed to modeling
+      nextPhase = 'modeling';
+    }
+
+    const phaseLabels = {
+      modeling: 'Proceeding to scientific modeling phase...',
+      compute: 'Proceeding to computation phase...',
+    };
+    await channel.sendMessage(chatJid, phaseLabels[nextPhase]);
+
+    // Reset notification flags
+    delete (globalThis as any)[`${group.folder}:pipeline_notified`];
+    delete (globalThis as any)[`${group.folder}:modeling_notified`];
+
+    // Force the next phase to run (per-group to avoid cross-group interference)
+    (globalThis as any)[`${group.folder}:__PIPELINE_FORCE_COMPUTE`] = true;
+
+    // Inject a system message for the next agent
+    const { storeMessage: dbStoreMessage } = await import('./db.js');
+    const actualPath = nextPhase === 'modeling' ? decisionPath! : planPath!;
+    const containerPath = actualPath.replace(
+      resolveGroupFolderPath(group.folder),
+      '/workspace/group',
+    );
+    const systemPrompt = `[SYSTEM] /proceed: User confirmed. Read ${containerPath} and execute your task.`;
+
+    dbStoreMessage({
+      id: `proceed_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      chat_jid: chatJid,
+      thread_id: threadId,
+      sender: 'system',
+      sender_name: 'Pipeline',
+      content: systemPrompt,
+      timestamp: new Date().toISOString(),
+      is_from_me: true, // bypass trigger check so pipeline proceeds in non-main groups
+      is_bot_message: false,
+    });
+
+    return true;
+  }
+
+  if (/^\/stop\b/i.test(lastMsg)) {
+    consumeCommand();
+    const state = queue.getState(chatJid);
+    if (state?.active && state.process) {
+      state.process.kill('SIGTERM');
+      if (state.containerName) killContainer(state.containerName);
+      // Set cancellation flag so pipeline phases don't continue after this kill
+      (globalThis as any)[`${group.folder}:__PIPELINE_CANCELLED`] = true;
       logger.info({ group: group.name }, 'Agent stopped via /stop command');
       await channel.sendMessage(chatJid, 'Agent stopped.');
     } else {
@@ -773,27 +1348,36 @@ async function handleControlCommand(
       if (state.containerName) killContainer(state.containerName);
       logger.info({ group: group.name }, 'Agent stopped for /new command');
     }
-    if (sessions[group.folder]) {
-      previousSessions[group.folder] = sessions[group.folder];
+    // Save any active session (base or profile-scoped) so /resume can restore it
+    const activeSession = sessions[group.folder]
+      || sessions[sessionKey(group.folder, 'intelligence')]
+      || sessions[sessionKey(group.folder, 'modeling')]
+      || sessions[sessionKey(group.folder, 'compute')];
+    if (activeSession) {
+      previousSessions[group.folder] = activeSession;
     }
-    delete sessions[group.folder];
-    deleteSession(group.folder);
-    lastAgentTimestamp[cursorKey] = messages[messages.length - 1].timestamp;
-    saveState();
-    logger.info({ group: group.name }, 'Session reset via /new command');
+    // Save pipeline notification flags so /resume can restore them
+    previousPipelineFlags[group.folder] = {
+      pipeline_notified: !!(globalThis as any)[`${group.folder}:pipeline_notified`],
+      modeling_notified: !!(globalThis as any)[`${group.folder}:modeling_notified`],
+    };
+    clearAllGroupSessions(group.folder);
+    consumeCommand();
+    logger.info(
+      { group: group.name },
+      'Session reset via /new command (all profiles cleared)',
+    );
     await channel.sendMessage(
       chatJid,
-      'Session cleared. Next message starts a fresh conversation. Use /resume to restore the previous session.',
+      'Session cleared (all agent profiles). Next message starts a fresh conversation.',
     );
     return true;
   }
 
   if (/^\/watch\b/i.test(lastMsg)) {
-    lastAgentTimestamp[cursorKey] = messages[messages.length - 1].timestamp;
-    saveState();
+    consumeCommand();
     const liveLogPath = path.join(
-      DATA_DIR,
-      'groups',
+      GROUPS_DIR,
       group.folder,
       'logs',
       'container-live.log',
@@ -834,12 +1418,13 @@ async function handleControlCommand(
   }
 
   if (/^\/status\b/i.test(lastMsg)) {
-    lastAgentTimestamp[cursorKey] = messages[messages.length - 1].timestamp;
-    saveState();
+    consumeCommand();
     const state = queue.getState(chatJid);
     const sid = sessions[group.folder];
     const parts: string[] = [];
+    const currentMode = getOperatingMode(group);
     parts.push(`Group: ${group.name} (${group.folder})`);
+    parts.push(`Mode: ${currentMode}${group.containerConfig?.mode ? ' (per-group)' : ' (global)'}`);
     parts.push(
       `Agent: ${state?.active ? 'running' : 'idle'}${state?.containerName ? ` (${state.containerName})` : ''}`,
     );
@@ -852,8 +1437,7 @@ async function handleControlCommand(
   }
 
   if (/^\/help\b/i.test(lastMsg)) {
-    lastAgentTimestamp[cursorKey] = messages[messages.length - 1].timestamp;
-    saveState();
+    consumeCommand();
     await channel.sendMessage(
       chatJid,
       [
@@ -865,6 +1449,8 @@ async function handleControlCommand(
         '/new — start fresh conversation',
         '/resume [id] — restore previous or specific session',
         '/compact [focus] — compress agent memory',
+        '/mode — show/switch mode (compute, intelligence, modeling, mc, auto)',
+        '/proceed — continue pipeline to next phase',
         '/help — this message',
       ].join('\n'),
     );
@@ -882,6 +1468,18 @@ async function handleControlCommand(
     );
     const lines: string[] = [];
     const currentId = sessions[group.folder];
+    // Show profile-scoped sessions for pipeline modes
+    const profileSessions: string[] = [];
+    for (const profile of ['intelligence', 'modeling', 'compute'] as const) {
+      const pKey = sessionKey(group.folder, profile);
+      const pSid = sessions[pKey];
+      if (pSid) profileSessions.push(`  ${profile}: ${pSid.slice(0, 8)}...`);
+    }
+    if (profileSessions.length > 0) {
+      lines.push('Active profile sessions:');
+      lines.push(...profileSessions);
+      lines.push('');
+    }
     if (fs.existsSync(transcriptDir)) {
       const files = fs
         .readdirSync(transcriptDir)
@@ -899,8 +1497,7 @@ async function handleControlCommand(
         lines.push(`${s.id.slice(0, 8)}  ${time}  ${kb}KB${marker}`);
       }
     }
-    lastAgentTimestamp[cursorKey] = messages[messages.length - 1].timestamp;
-    saveState();
+    consumeCommand();
     const msg =
       lines.length > 0
         ? `Sessions:\n${lines.join('\n')}\n\nUse /resume <id prefix> to switch.`
@@ -944,8 +1541,17 @@ async function handleControlCommand(
     if (targetId) {
       sessions[group.folder] = targetId;
       setSession(group.folder, targetId);
-      lastAgentTimestamp[cursorKey] = messages[messages.length - 1].timestamp;
-      saveState();
+      // Restore pipeline notification flags so user isn't re-prompted
+      const prevFlags = previousPipelineFlags[group.folder];
+      if (prevFlags) {
+        if (prevFlags.pipeline_notified) {
+          (globalThis as any)[`${group.folder}:pipeline_notified`] = true;
+        }
+        if (prevFlags.modeling_notified) {
+          (globalThis as any)[`${group.folder}:modeling_notified`] = true;
+        }
+      }
+      consumeCommand();
       logger.info(
         { group: group.name, sessionId: targetId },
         'Session restored via /resume',
@@ -955,8 +1561,7 @@ async function handleControlCommand(
         `Session restored (${targetId.slice(0, 8)}...). Agent will continue with that session's history.`,
       );
     } else {
-      lastAgentTimestamp[cursorKey] = messages[messages.length - 1].timestamp;
-      saveState();
+      consumeCommand();
       await channel.sendMessage(
         chatJid,
         'No session found. Use /sessions to list available sessions.',
@@ -969,6 +1574,174 @@ async function handleControlCommand(
 }
 
 // ── Startup Banner ──────────────────────────────────────────────────────
+
+/**
+ * Interactive module toggle at startup.
+ * Uses @inquirer/prompts for proper TTY handling.
+ * Only shows in TTY mode (not in systemd/launchd background service).
+ * Writes selected modules to .env so they persist across restarts.
+ */
+async function interactiveModuleToggle(): Promise<void> {
+  // Skip in non-interactive environments (systemd, launchd, piped stdin)
+  if (!process.stdin.isTTY || !process.stdout.isTTY) return;
+  // Skip if --no-prompt flag is passed
+  if (process.argv.includes('--no-prompt')) return;
+
+  const ESC = '\x1b';
+  const C = {
+    reset: `${ESC}[0m`,
+    bold: `${ESC}[1m`,
+    dim: `${ESC}[2m`,
+    brightGreen: `${ESC}[92m`,
+    brightYellow: `${ESC}[93m`,
+    brightCyan: `${ESC}[96m`,
+    brightWhite: `${ESC}[97m`,
+    fg: (n: number) => `${ESC}[38;5;${n}m`,
+  };
+  const GRAD = [
+    196, 197, 198, 199, 200, 164, 128, 92, 56, 57, 63, 69, 75, 81, 45, 39, 33,
+    27,
+  ];
+  const grad = (text: string) =>
+    [...text]
+      .map((ch, i) => {
+        if (ch === ' ') return ch;
+        const idx = Math.floor(
+          (i / Math.max(text.length - 1, 1)) * (GRAD.length - 1),
+        );
+        return `${C.fg(GRAD[idx])}${C.bold}${ch}${C.reset}`;
+      })
+      .join('');
+
+  const W = Math.min(process.stdout.columns || 80, 76);
+  const bTop = (t: string) => {
+    const s = ` ${t} `;
+    const r = Math.max(0, W - 4 - s.length);
+    return `  ${C.dim}╭──${C.reset}${C.bold}${C.brightCyan}${s}${C.reset}${C.dim}${'─'.repeat(r)}╮${C.reset}`;
+  };
+  const strip = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, '');
+  const bLine = (text: string) => {
+    const vis = strip(text).length;
+    const pad = Math.max(0, W - 4 - vis);
+    return `  ${C.dim}│${C.reset} ${text}${' '.repeat(pad)} ${C.dim}│${C.reset}`;
+  };
+  const bBot = () => `  ${C.dim}╰${'─'.repeat(W - 2)}╯${C.reset}`;
+  const bDiv = () => `  ${C.dim}├${'─'.repeat(W - 2)}┤${C.reset}`;
+
+  const modeChoices = [
+    {
+      key: '1',
+      value: 'compute',
+      label: 'Compute',
+      desc: 'DFT, MD, MLIP calculations',
+    },
+    {
+      key: '2',
+      value: 'intelligence',
+      label: 'Intelligence',
+      desc: 'research direction analysis',
+    },
+    {
+      key: '3',
+      value: 'modeling',
+      label: 'Modeling',
+      desc: 'physical/mathematical modeling',
+    },
+    {
+      key: '4',
+      value: 'modeling+compute',
+      label: 'Modeling + Compute',
+      desc: 'design then execute',
+    },
+    {
+      key: '5',
+      value: 'intelligence+compute',
+      label: 'Autonomous Research',
+      desc: 'full pipeline',
+    },
+  ];
+
+  console.log(bTop('Select Operating Mode'));
+  for (const m of modeChoices) {
+    console.log(
+      bLine(
+        `${C.brightCyan}${m.key}${C.reset}  ${C.bold}${m.label}${C.reset}  ${C.dim}${m.desc}${C.reset}`,
+      ),
+    );
+  }
+  console.log(bBot());
+  console.log();
+  process.stdout.write(`  ${C.dim}Enter 1-5 (default: 1):${C.reset} `);
+
+  const answer = await new Promise<string>((resolve) => {
+    const onData = (data: Buffer) => {
+      process.stdin.removeListener('data', onData);
+      process.stdin.pause();
+      resolve(data.toString().trim());
+    };
+    process.stdin.resume();
+    process.stdin.once('data', onData);
+  });
+
+  const picked = modeChoices.find((m) => m.key === answer) || modeChoices[0];
+  const mode = picked.value;
+  console.log(`  ${C.brightGreen}✔${C.reset} ${picked.label}`);
+  console.log();
+
+  try {
+    // Write mode to .env
+    const envPath = path.join(process.cwd(), '.env');
+    let envContent = '';
+    try {
+      envContent = fs.readFileSync(envPath, 'utf-8');
+    } catch {
+      /* no .env yet */
+    }
+
+    const enableIntel =
+      mode === 'intelligence' || mode === 'intelligence+compute';
+    const enableModeling =
+      mode === 'modeling' ||
+      mode === 'modeling+compute' ||
+      mode === 'intelligence+compute';
+
+    if (/^INTELLIGENCE_MODULE=/m.test(envContent)) {
+      envContent = envContent.replace(
+        /^INTELLIGENCE_MODULE=\w*/m,
+        `INTELLIGENCE_MODULE=${enableIntel || enableModeling}`,
+      );
+    } else {
+      envContent += `\nINTELLIGENCE_MODULE=${enableIntel || enableModeling}\n`;
+    }
+
+    if (/^INTELLIGENCE_MODE=/m.test(envContent)) {
+      envContent = envContent.replace(
+        /^INTELLIGENCE_MODE=\S*/m,
+        `INTELLIGENCE_MODE=${mode}`,
+      );
+    } else {
+      envContent += `INTELLIGENCE_MODE=${mode}\n`;
+    }
+
+    fs.writeFileSync(envPath, envContent);
+    (globalThis as any).__INTELLIGENCE_MODULE_OVERRIDE =
+      enableIntel || enableModeling;
+
+    const labels: Record<string, string> = {
+      compute: `${C.dim}Compute${C.reset}`,
+      intelligence: `${C.brightCyan}Intelligence${C.reset}`,
+      modeling: `${C.brightCyan}Modeling${C.reset}`,
+      'modeling+compute': `${C.brightGreen}Modeling → Compute${C.reset}`,
+      'intelligence+compute': `${C.brightGreen}Autonomous Research${C.reset}`,
+    };
+    console.log(
+      `  ${C.brightGreen}✔${C.reset}  Mode: ${labels[mode] || mode}  ${C.dim}(saved to .env)${C.reset}`,
+    );
+    console.log();
+  } catch {
+    // User pressed Ctrl+C or prompt was interrupted — continue without changes
+  }
+}
 
 function printStartupBanner(): void {
   const ESC = '\x1b';
@@ -1065,6 +1838,21 @@ function printStartupBanner(): void {
       `${C.brightCyan}Groups:${C.reset} ${groupCount}  ${C.dim}│${C.reset}  ${C.brightCyan}Trigger:${C.reset} @${ASSISTANT_NAME}`,
     ),
   );
+
+  // Modules status
+  console.log(bDiv());
+  console.log(bLine(`${C.bold}${C.brightWhite}Modules${C.reset}`));
+  const currentMode = getOperatingMode();
+  const modeIcons: Record<string, string> = {
+    compute: `${C.dim}○ Compute${C.reset}`,
+    intelligence: `${C.brightCyan}● Intelligence${C.reset}`,
+    modeling: `${C.brightCyan}● Modeling${C.reset}`,
+    'modeling+compute': `${C.brightGreen}● Modeling → Compute${C.reset}`,
+    'intelligence+compute': `${C.brightGreen}● Autonomous Research${C.reset} ${C.dim}(${PIPELINE_AUTO ? 'auto' : 'manual'})${C.reset}`,
+  };
+  const intStatus = modeIcons[currentMode] || modeIcons['compute'];
+  console.log(bLine(intStatus));
+
   console.log(bDiv());
   console.log(
     bLine(
@@ -1233,7 +2021,19 @@ function ensureContainerSystemRunning(): void {
 }
 
 async function main(): Promise<void> {
+  // Interactive module toggle (only in TTY mode, skips in background services)
+  await interactiveModuleToggle();
+
   ensureContainerSystemRunning();
+
+  // Start credential proxy before any containers spawn
+  await startCredentialProxy(CREDENTIAL_PROXY_PORT).catch((err) => {
+    logger.warn(
+      { err },
+      'Credential proxy failed to start — containers will use stdin secrets as fallback',
+    );
+  });
+
   initDatabase();
   logger.info('Database initialized');
   loadState();
@@ -1242,8 +2042,14 @@ async function main(): Promise<void> {
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
-    await queue.shutdown(10000);
-    for (const ch of channels) await ch.disconnect();
+    try {
+      await queue.shutdown(10000);
+      for (const ch of channels) {
+        await ch.disconnect().catch(() => {});
+      }
+    } catch (err) {
+      logger.warn({ err }, 'Error during shutdown');
+    }
     process.exit(0);
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));

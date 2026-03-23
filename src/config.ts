@@ -17,6 +17,7 @@ const envConfig = readEnvFile([
   'IDLE_TIMEOUT',
   'MAX_CONCURRENT_CONTAINERS',
   'LOG_LEVEL',
+  'INTELLIGENCE_MODULE',
 ]);
 
 export const ASSISTANT_NAME =
@@ -71,11 +72,27 @@ export const CONTAINER_TIMEOUT = parseInt(
   process.env.CONTAINER_TIMEOUT || envConfig.CONTAINER_TIMEOUT || '604800000',
   10,
 );
-export const CONTAINER_MAX_OUTPUT_SIZE = parseInt(
-  process.env.CONTAINER_MAX_OUTPUT_SIZE || '10485760',
-  10,
-); // 10MB default
+export const CONTAINER_MAX_OUTPUT_SIZE =
+  parseInt(process.env.CONTAINER_MAX_OUTPUT_SIZE || '10485760', 10) ||
+  10485760; // 10MB default; fallback guards against NaN from non-numeric env
 export const IPC_POLL_INTERVAL = 1000;
+// Intelligence module: off by default, enable with INTELLIGENCE_MODULE=true in .env
+export const INTELLIGENCE_MODULE =
+  (
+    process.env.INTELLIGENCE_MODULE ||
+    envConfig.INTELLIGENCE_MODULE ||
+    ''
+  ).toLowerCase() === 'true';
+
+// Pipeline mode: 'manual' (default) = pause after intelligence for user decision
+//                'auto' = automatically proceed to computation
+export const PIPELINE_AUTO =
+  (process.env.PIPELINE_AUTO || '').toLowerCase() === 'true';
+
+export const CREDENTIAL_PROXY_PORT = parseInt(
+  process.env.CREDENTIAL_PROXY_PORT || '3001',
+  10,
+);
 export const IDLE_TIMEOUT = parseInt(
   process.env.IDLE_TIMEOUT || envConfig.IDLE_TIMEOUT || '604800000',
   10,

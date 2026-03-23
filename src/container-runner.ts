@@ -14,11 +14,14 @@ import {
   CONTAINER_IMAGE,
   CONTAINER_MAX_OUTPUT_SIZE,
   CONTAINER_TIMEOUT,
+  CREDENTIAL_PROXY_PORT,
   DATA_DIR,
   GROUPS_DIR,
   IDLE_TIMEOUT,
+  INTELLIGENCE_MODULE,
   TIMEZONE,
 } from './config.js';
+import { detectAuthMode } from './credential-proxy.js';
 import { readEnvFile } from './env.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
@@ -29,7 +32,7 @@ import {
 } from './container-runtime.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
-import { agentEvents } from './web/events.js';
+import { agentEvents, parseStructuredEvent } from './web/events.js';
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---MATCLAW_OUTPUT_START---';
@@ -59,9 +62,207 @@ interface VolumeMount {
   readonly: boolean;
 }
 
+export type AgentProfile = 'compute' | 'intelligence' | 'modeling' | null;
+
+interface SkillProfiles {
+  profiles: Record<string, { skills: string[]; exclude?: string[] }>;
+}
+
+/**
+ * Resolve which skill directories an agent should receive.
+ * If no profile is specified, all skills are loaded (with INTELLIGENCE_MODULE check).
+ */
+function resolveAllowedSkills(
+  skillsSrc: string,
+  profile: AgentProfile,
+): Set<string> {
+  const allDirs = fs
+    .readdirSync(skillsSrc)
+    .filter((e) => fs.statSync(path.join(skillsSrc, e)).isDirectory());
+
+  // Load profiles.json if it exists
+  const profilesPath = path.join(skillsSrc, 'profiles.json');
+  if (profile && fs.existsSync(profilesPath)) {
+    try {
+      const config: SkillProfiles = JSON.parse(
+        fs.readFileSync(profilesPath, 'utf-8'),
+      );
+      const prof = config.profiles[profile];
+      if (prof) {
+        const allowed = new Set(prof.skills);
+        const excluded = new Set(prof.exclude || []);
+        // Also include any skill not explicitly excluded (for future skills)
+        for (const dir of allDirs) {
+          if (!excluded.has(dir) && (allowed.has(dir) || allowed.has('*'))) {
+            allowed.add(dir);
+          }
+        }
+        logger.info(
+          { profile, skills: [...allowed] },
+          'Skill router: loaded profile',
+        );
+        return allowed;
+      }
+    } catch (err) {
+      logger.warn({ err }, 'Failed to load skill profiles, using defaults');
+    }
+  }
+
+  // Default: all skills, with intelligence module check
+  const intellEnabled =
+    (globalThis as any).__INTELLIGENCE_MODULE_OVERRIDE ?? INTELLIGENCE_MODULE;
+  const result = new Set(allDirs);
+  if (!intellEnabled) result.delete('intelligence');
+  return result;
+}
+
+/**
+ * Generate mode-specific CLAUDE.md instructions based on agent profile.
+ * Returns null for default (no override).
+ */
+function getModeInstructions(profile: AgentProfile): string | null {
+  if (profile === 'intelligence') {
+    return `# Operating Mode: Intelligence Only
+
+You are a **research intelligence analyst**. Your job is to analyze research directions, collect data from academic sources, and provide expert evaluations.
+
+## Your Capabilities
+- Literature search (arXiv, Semantic Scholar, web search for Nature/Science/top journals)
+- Materials database queries (Materials Project, AFLOW, OQMD)
+- Patent landscape analysis
+- Industry and market intelligence
+- Multi-expert evaluation (7 independent AI expert reviews)
+- Research trend visualization (publication trends, citation analysis)
+- Research direction recommendations
+
+## What You Do NOT Do
+- You do NOT run DFT, MD, or any computational simulations
+- You do NOT execute Quantum ESPRESSO, LAMMPS, MACE, or RASPA3
+- You do NOT generate computation plans or parameters
+- Your output is \`research_decision.json\` — a research direction recommendation
+
+## Key Tools
+\`\`\`bash
+python3 /home/node/.claude/skills/intelligence/tools/arxiv_search.py "query" --max-results 30
+python3 /home/node/.claude/skills/intelligence/tools/semantic_scholar.py "query" --limit 50
+python3 /home/node/.claude/skills/intelligence/tools/materials_project_query.py --chemsys "Li-La-Zr-O"
+python3 /home/node/.claude/skills/intelligence/tools/trend_analysis.py data.json --output figures/
+python3 /home/node/.claude/skills/intelligence/tools/scoring.py expert_scores.json --output final_scores.json
+\`\`\`
+
+## Pipeline
+Follow the 5-phase pipeline in \`/home/node/.claude/skills/intelligence/SKILL.md\`.
+`;
+  }
+
+  if (profile === 'modeling') {
+    return `# Operating Mode: Scientific Modeling (Designer, NOT Executor)
+
+You are a **materials science research designer**. You design computational experiments — you do NOT execute them.
+
+Think of yourself as the **principal investigator writing the research proposal**: you decide WHAT to calculate, WHICH method to use, and WHY, then hand the plan to your student (the Compute Agent) to execute.
+
+## Your Role
+- Analyze the physical problem: what phenomenon, what material system, what length/time scales
+- Select physical models: Arrhenius diffusion, harmonic approximation, Boltzmann transport, NEB, etc.
+- Map to computational methods: DFT-PBE/HSE06, MACE-MP-0, AIMD, phonopy, etc.
+- Determine ALL parameters with physical justification
+- Design convergence tests
+- Define experimental validation strategy
+- Use WebSearch to research method benchmarks and best practices from literature
+
+## Strictly Forbidden
+- **Do NOT run any computation commands** — no pw.x, lmp, python3 train.py, mpirun
+- **Do NOT execute DFT/MD/MC calculations** — no Quantum ESPRESSO, LAMMPS, MACE execution
+- **Do NOT write and run Python computation scripts** — no creating .py files and running them
+- **You ONLY write computation_plan.json** — actual calculations are executed by the downstream Compute Agent
+
+## Downstream Compute Agent Tools (reference these in your plan)
+The Compute Agent has access to:
+- Quantum ESPRESSO (pw.x, ph.x, pp.x) — DFT calculations
+- LAMMPS — classical molecular dynamics
+- MACE / MACE-MP-0 — machine learning interatomic potentials
+- ASE — Atomic Simulation Environment
+- pymatgen — structure analysis and manipulation
+- phonopy — phonon calculations
+- RASPA3 — Monte Carlo adsorption simulations
+- BoltzTraP2 — electronic transport
+- Miniconda Python environment with scientific packages
+
+## Input
+If \`/workspace/group/research_decision.json\` exists, read it for context.
+Otherwise, work directly from the user's message.
+
+## Output
+Write \`/workspace/group/computation_plan.json\` with the complete computational design.
+Follow the detailed workflow in \`/home/node/.claude/skills/modeling/SKILL.md\`.
+
+## Key Principle
+**Every parameter needs physical justification.** Not "60 Ry cutoff" but "60 Ry because Miara 2015 showed convergence within 1 meV/atom for LLZO at this value."
+`;
+  }
+
+  if (profile === 'compute') {
+    return `# Operating Mode: Computation
+
+You are a **computational materials scientist**. You execute calculations, generate publication-quality figures, and present results clearly.
+
+## Your Capabilities
+- DFT calculations (Quantum ESPRESSO)
+- Molecular dynamics (LAMMPS, MACE)
+- Monte Carlo simulations (RASPA3)
+- Machine learning potentials (MACE, other MLIPs)
+- Crystal structure analysis (pymatgen, ASE)
+- Data analysis and visualization (matplotlib)
+
+## If computation_plan.json exists
+Read it carefully. Execute the calculations exactly as specified — follow the parameters, convergence tests, and validation strategy.
+
+## If research_decision.json exists (but no computation_plan.json)
+Read it for context on what direction to pursue, then decide methods and parameters yourself.
+
+## Mandatory Output Rules
+
+### 1. Always include figures in your response
+Every calculation that produces a plot MUST include it using markdown image syntax:
+\`\`\`
+![Band Structure](band_structure.png)
+![Phonon Dispersion](si_phonon_combined.png)
+\`\`\`
+Do NOT just list file paths — embed the images so the user sees them directly.
+
+### 2. Always write a structured summary
+After calculations complete, present results as:
+- **Method**: what was used (tool, parameters, system size)
+- **Key Results**: with specific numbers and units
+- **Validation**: comparison with experiment/literature if available
+- **Figures**: embedded inline (not just file paths)
+- **Output Files**: list generated files for the user
+
+### 3. Generate publication-quality figures
+- Always set \`figsize=(10, 6)\` or similar fixed size
+- Use clear axis labels with units
+- Add legends when multiple datasets
+- Save as PNG with \`dpi=150\`
+- **CRITICAL: Always set a fixed figure height. NEVER let height scale with data.**
+
+### 4. Data Visualization
+Always generate plots for numerical results. Never present raw numbers without a figure.
+- Convergence tests → convergence plot
+- Band structure → band plot
+- DOS → DOS plot
+- MD trajectory → property vs time plot
+- Phonons → dispersion + DOS side-by-side
+`;
+  }
+
+  return null;
+}
+
 function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
+  agentProfile: AgentProfile = null,
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
   const projectRoot = process.cwd();
@@ -140,22 +341,74 @@ function buildVolumeMounts(
   }
 
   // Sync skills from container/skills/ into each group's .claude/skills/
-  // Preserves nested group structure: each top-level directory (with SKILL.md
-  // index) is copied recursively. Agent discovers groups, then reads sub-skills.
-  // Clean copy: remove destination first to avoid stale files from previous syncs.
+  // Uses agent profiles to determine which skills each agent role receives.
+  // This ensures intelligence agents don't see computation skills and vice versa.
   const skillsSrc = path.join(process.cwd(), 'container', 'skills');
   const skillsDst = path.join(groupSessionsDir, 'skills');
   if (fs.existsSync(skillsSrc)) {
     if (fs.existsSync(skillsDst)) {
       fs.rmSync(skillsDst, { recursive: true });
     }
+
+    // Load agent profile to determine allowed skills
+    const allowedSkills = resolveAllowedSkills(skillsSrc, agentProfile);
+
     for (const entry of fs.readdirSync(skillsSrc)) {
       const srcDir = path.join(skillsSrc, entry);
       if (!fs.statSync(srcDir).isDirectory()) continue;
+      // Filter by profile
+      if (!allowedSkills.has(entry)) continue;
       const dstDir = path.join(skillsDst, entry);
       fs.cpSync(srcDir, dstDir, { recursive: true });
     }
   }
+
+  // Write mode-specific CLAUDE.md directly to the group folder.
+  // This is the CLAUDE.md the agent reads first (CWD = /workspace/group/).
+  // The original group CLAUDE.md is backed up and restored when mode changes.
+  // Write mode-specific CLAUDE.md to BOTH locations:
+  // 1. groupSessionsDir → /home/node/.claude/CLAUDE.md (user-level, highest priority)
+  // 2. groupDir → /workspace/group/CLAUDE.md (project-level)
+  const modeInstructions = getModeInstructions(agentProfile);
+  const sessionClaudeMd = path.join(groupSessionsDir, 'CLAUDE.md');
+  const groupClaudeMd = path.join(groupDir, 'CLAUDE.md');
+  const groupClaudeMdBackup = path.join(groupDir, '.CLAUDE.md.original');
+
+  if (modeInstructions) {
+    // Backup original group CLAUDE.md if not already backed up.
+    // If no CLAUDE.md exists yet (new group), create empty backup so restore
+    // doesn't accidentally keep profile instructions as the "original".
+    if (!fs.existsSync(groupClaudeMdBackup)) {
+      if (fs.existsSync(groupClaudeMd)) {
+        fs.copyFileSync(groupClaudeMd, groupClaudeMdBackup);
+      } else {
+        fs.writeFileSync(groupClaudeMdBackup, '');
+      }
+    }
+    // Write to both locations
+    fs.writeFileSync(sessionClaudeMd, modeInstructions);
+    fs.writeFileSync(groupClaudeMd, modeInstructions);
+  } else {
+    // No profile: restore original group CLAUDE.md, remove session override
+    if (fs.existsSync(groupClaudeMdBackup)) {
+      const backupContent = fs.readFileSync(groupClaudeMdBackup, 'utf-8');
+      if (backupContent) {
+        fs.copyFileSync(groupClaudeMdBackup, groupClaudeMd);
+      } else {
+        // Empty backup means group had no CLAUDE.md before profile mode
+        try { fs.unlinkSync(groupClaudeMd); } catch { /* ok */ }
+      }
+      // Remove backup so it's re-created fresh next time a profile is used,
+      // capturing any user edits made since the restore.
+      try { fs.unlinkSync(groupClaudeMdBackup); } catch { /* ok */ }
+    }
+    try {
+      fs.unlinkSync(sessionClaudeMd);
+    } catch {
+      /* doesn't exist */
+    }
+  }
+
   mounts.push({
     hostPath: groupSessionsDir,
     containerPath: '/home/node/.claude',
@@ -219,7 +472,15 @@ function buildVolumeMounts(
   const groupIpcDir = resolveGroupIpcPath(group.folder);
   fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
-  fs.mkdirSync(path.join(groupIpcDir, 'input'), { recursive: true });
+  const inputDir = path.join(groupIpcDir, 'input');
+  fs.mkdirSync(inputDir, { recursive: true });
+  // Clean stale input files from previous container runs to prevent
+  // out-of-context or duplicate messages in the new container
+  try {
+    for (const f of fs.readdirSync(inputDir)) {
+      try { fs.unlinkSync(path.join(inputDir, f)); } catch { /* ok */ }
+    }
+  } catch { /* ignore */ }
   mounts.push({
     hostPath: groupIpcDir,
     containerPath: '/workspace/ipc',
@@ -268,14 +529,11 @@ function buildVolumeMounts(
 
 /**
  * Read allowed secrets from .env for passing to the container via stdin.
- * Secrets are never written to disk or mounted as files.
+ * Anthropic credentials are injected by the credential proxy — NOT passed here.
+ * Only non-Anthropic API keys are passed via stdin.
  */
 function readSecrets(): Record<string, string> {
   return readEnvFile([
-    // Claude Agent SDK
-    'CLAUDE_CODE_OAUTH_TOKEN',
-    'ANTHROPIC_API_KEY',
-    'ANTHROPIC_BASE_URL',
     // Codex SDK (OpenAI-compatible)
     'CODEX_API_KEY',
     'OPENAI_API_KEY',
@@ -283,8 +541,9 @@ function readSecrets(): Record<string, string> {
     'CODEX_MODEL',
     // Gemini
     'GOOGLE_API_KEY',
-    // Shared
+    // Materials science APIs
     'MP_API_KEY',
+    'SEMANTIC_SCHOLAR_API_KEY',
   ]);
 }
 
@@ -312,6 +571,15 @@ function buildContainerArgs(
     args.push('-e', `AGENT_MODEL=${model}`);
   }
 
+  // Pass operating mode so the agent knows its role
+  const intellEnabled =
+    (globalThis as any).__INTELLIGENCE_MODULE_OVERRIDE ?? INTELLIGENCE_MODULE;
+  const freshMode = readEnvFile(['INTELLIGENCE_MODE']);
+  const mode =
+    freshMode.INTELLIGENCE_MODE ||
+    (intellEnabled ? 'intelligence+compute' : 'compute');
+  args.push('-e', `MATCLAW_MODE=${mode}`);
+
   // Run as host user so bind-mounted files are accessible.
   // Skip when running as root (uid 0), as the container's node user (uid 1000),
   // or when getuid is unavailable (native Windows without WSL).
@@ -320,6 +588,24 @@ function buildContainerArgs(
   if (hostUid != null && hostUid !== 0 && hostUid !== 1000) {
     args.push('--user', `${hostUid}:${hostGid}`);
     args.push('-e', 'HOME=/home/node');
+  }
+
+  // Route API traffic through the credential proxy (containers never see real secrets)
+  args.push('--add-host', 'host.docker.internal:host-gateway');
+  args.push(
+    '-e',
+    `ANTHROPIC_BASE_URL=http://host.docker.internal:${CREDENTIAL_PROXY_PORT}`,
+  );
+
+  // Mirror the host's auth method with a placeholder value.
+  // API key mode: SDK sends x-api-key, proxy replaces with real key.
+  // OAuth mode: SDK exchanges placeholder token for temp API key,
+  //             proxy injects real OAuth token on that exchange request.
+  const authMode = detectAuthMode();
+  if (authMode === 'api-key') {
+    args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
+  } else {
+    args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
   }
 
   for (const mount of mounts) {
@@ -340,13 +626,14 @@ export async function runContainerAgent(
   input: ContainerInput,
   onProcess: (proc: ChildProcess, containerName: string) => void,
   onOutput?: (output: ContainerOutput) => Promise<void>,
+  agentProfile: AgentProfile = null,
 ): Promise<ContainerOutput> {
   const startTime = Date.now();
 
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
-  const mounts = buildVolumeMounts(group, input.isMain);
+  const mounts = buildVolumeMounts(group, input.isMain, agentProfile);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `matclaw-${safeName}-${Date.now()}`;
   const containerArgs = buildContainerArgs(mounts, containerName);
@@ -421,6 +708,7 @@ export async function runContainerAgent(
     let parseBuffer = '';
     let newSessionId: string | undefined;
     let outputChain = Promise.resolve();
+    let hadStreamingOutput = false;
 
     container.stdout.on('data', (data) => {
       const chunk = data.toString();
@@ -483,7 +771,12 @@ export async function runContainerAgent(
             });
             // Call onOutput for all markers (including null results)
             // so idle timers start even for "silent" query completions.
-            outputChain = outputChain.then(() => onOutput(parsed));
+            outputChain = outputChain.then(() => onOutput(parsed)).catch((err) => {
+              logger.error(
+                { group: group.name, err },
+                'onOutput handler failed',
+              );
+            });
           } catch (err) {
             logger.warn(
               { group: group.name, error: err },
@@ -503,6 +796,18 @@ export async function runContainerAgent(
         if (line) {
           liveStream.write(`[stderr] ${line}\n`);
           logger.debug({ container: group.folder }, line);
+
+          // Parse structured events: [EVENT] {"type":"...","content":"..."}
+          const structuredEvent = parseStructuredEvent(line);
+          if (structuredEvent) {
+            agentEvents.emit('agent', {
+              type: 'agent:event',
+              group: group.name,
+              groupFolder: group.folder,
+              timestamp: structuredEvent.timestamp || new Date().toISOString(),
+              data: structuredEvent,
+            });
+          }
         }
       }
 
@@ -531,7 +836,6 @@ export async function runContainerAgent(
     });
 
     let timedOut = false;
-    let hadStreamingOutput = false;
     const configTimeout = group.containerConfig?.timeout || CONTAINER_TIMEOUT;
     // Grace period: hard timeout must be at least IDLE_TIMEOUT + 30s so the
     // graceful _close sentinel has time to trigger before the hard kill fires.
@@ -562,7 +866,12 @@ export async function runContainerAgent(
       timeout = setTimeout(killOnTimeout, timeoutMs);
     };
 
+    // Guard against double resolution (close + error can both fire)
+    let resolved = false;
+
     container.on('close', (code) => {
+      if (resolved) return;
+      resolved = true;
       clearTimeout(timeout);
       const duration = Date.now() - startTime;
 
@@ -642,6 +951,8 @@ export async function runContainerAgent(
               result: null,
               newSessionId,
             });
+          }).catch(() => {
+            resolve({ status: 'success', result: null, newSessionId });
           });
           return;
         }
@@ -654,7 +965,7 @@ export async function runContainerAgent(
         resolve({
           status: 'error',
           result: null,
-          error: `Container timed out after ${configTimeout}ms`,
+          error: `Container timed out after ${timeoutMs}ms`,
         });
         return;
       }
@@ -719,7 +1030,6 @@ export async function runContainerAgent(
 
       if (code !== 0) {
         // 137 = SIGKILL (docker kill), 143 = SIGTERM — expected when /stop or /new is used
-        // 137 = SIGKILL (docker kill), 143 = SIGTERM — expected when /stop or /new is used
         const isSignalKill = code === 137 || code === 143;
         if (isSignalKill && hadStreamingOutput) {
           logger.info(
@@ -761,6 +1071,8 @@ export async function runContainerAgent(
             result: null,
             newSessionId,
           });
+        }).catch(() => {
+          resolve({ status: 'success', result: null, newSessionId });
         });
         return;
       }
@@ -768,8 +1080,8 @@ export async function runContainerAgent(
       // Legacy mode: parse the last output marker pair from accumulated stdout
       try {
         // Extract JSON between sentinel markers for robust parsing
-        const startIdx = stdout.indexOf(OUTPUT_START_MARKER);
-        const endIdx = stdout.indexOf(OUTPUT_END_MARKER);
+        const startIdx = stdout.lastIndexOf(OUTPUT_START_MARKER);
+        const endIdx = stdout.indexOf(OUTPUT_END_MARKER, startIdx);
 
         let jsonLine: string;
         if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
@@ -815,7 +1127,10 @@ export async function runContainerAgent(
     });
 
     container.on('error', (err) => {
+      if (resolved) return;
+      resolved = true;
       clearTimeout(timeout);
+      liveStream.end();
       logger.error(
         { group: group.name, containerName, error: err },
         'Container spawn error',
@@ -852,7 +1167,9 @@ export function writeTasksSnapshot(
     : tasks.filter((t) => t.groupFolder === groupFolder);
 
   const tasksFile = path.join(groupIpcDir, 'current_tasks.json');
-  fs.writeFileSync(tasksFile, JSON.stringify(filteredTasks, null, 2));
+  const tempTasksFile = `${tasksFile}.tmp`;
+  fs.writeFileSync(tempTasksFile, JSON.stringify(filteredTasks, null, 2));
+  fs.renameSync(tempTasksFile, tasksFile);
 }
 
 export interface AvailableGroup {
@@ -880,8 +1197,9 @@ export function writeGroupsSnapshot(
   const visibleGroups = isMain ? groups : [];
 
   const groupsFile = path.join(groupIpcDir, 'available_groups.json');
+  const tempGroupsFile = `${groupsFile}.tmp`;
   fs.writeFileSync(
-    groupsFile,
+    tempGroupsFile,
     JSON.stringify(
       {
         groups: visibleGroups,
@@ -891,4 +1209,5 @@ export function writeGroupsSnapshot(
       2,
     ),
   );
+  fs.renameSync(tempGroupsFile, groupsFile);
 }
