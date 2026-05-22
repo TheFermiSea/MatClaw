@@ -137,50 +137,25 @@ function waitForIpcMessage(): Promise<string | null> {
   });
 }
 
-function readClaudeOAuthToken(): { present: boolean; expired: boolean; token?: string } {
+function hasClaudeCredentialsFile(): boolean {
   try {
-    if (!fs.existsSync(CLAUDE_CREDENTIALS_PATH)) {
-      return { present: false, expired: false };
-    }
+    if (!fs.existsSync(CLAUDE_CREDENTIALS_PATH)) return false;
     const data = JSON.parse(fs.readFileSync(CLAUDE_CREDENTIALS_PATH, 'utf-8')) as Record<string, unknown>;
     const oauth = (data['claudeAiOauth'] ?? data['oauth'] ?? data) as Record<string, unknown>;
-    const token = oauth['accessToken'] ?? oauth['access_token'];
-    const expiresAt = oauth['expiresAt'] ?? oauth['expires_at'];
-    let expired = false;
-
-    if (typeof expiresAt === 'number') {
-      const expiresMs = expiresAt > 1e12 ? expiresAt : expiresAt * 1000;
-      expired = Date.now() > expiresMs;
-    }
-
-    return {
-      present: true,
-      expired,
-      token: !expired && typeof token === 'string' && token ? token : undefined,
-    };
+    return Boolean(oauth['refreshToken'] ?? oauth['refresh_token']);
   } catch {
-    return { present: true, expired: false };
+    return false;
   }
 }
 
-function refreshClaudeOAuthFromCredentialFile(sdkEnv: Record<string, string | undefined>): boolean {
-  const oauth = readClaudeOAuthToken();
-  if (!oauth.present) return false;
-
-  if (oauth.token) {
-    if (sdkEnv['CLAUDE_CODE_OAUTH_TOKEN'] !== oauth.token) {
-      sdkEnv['CLAUDE_CODE_OAUTH_TOKEN'] = oauth.token;
-      return true;
-    }
-    return false;
-  }
-
-  // Do not keep using a stale token from IPC after the mounted Claude
-  // credential file says the access token has expired. With the env var
-  // removed, Claude Code can fall back to the credentials file/refresh token.
-  if (oauth.expired && sdkEnv['CLAUDE_CODE_OAUTH_TOKEN'] !== undefined) {
+function preferClaudeCredentialsFile(sdkEnv: Record<string, string | undefined>): boolean {
+  if (
+    !sdkEnv['ANTHROPIC_API_KEY'] &&
+    sdkEnv['CLAUDE_CODE_OAUTH_TOKEN'] !== undefined &&
+    hasClaudeCredentialsFile()
+  ) {
     delete sdkEnv['CLAUDE_CODE_OAUTH_TOKEN'];
-    log('Dropped expired Claude OAuth token from SDK env');
+    log('Using Claude credentials file instead of short-lived OAuth token env var');
     return true;
   }
 
@@ -215,7 +190,7 @@ function refreshSdkEnv(sdkEnv: Record<string, string | undefined>): void {
       }
     }
 
-    updated = refreshClaudeOAuthFromCredentialFile(sdkEnv) || updated;
+    updated = preferClaudeCredentialsFile(sdkEnv) || updated;
 
     if (updated) {
       log('Refreshed SDK secrets from IPC');

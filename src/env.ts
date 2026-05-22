@@ -50,7 +50,7 @@ export function readEnvFile(keys: string[]): Record<string, string> {
   const hasOAuthToken =
     result.CLAUDE_CODE_OAUTH_TOKEN ||
     /^CLAUDE_CODE_OAUTH_TOKEN=.+/m.test(content);
-  if (!hasApiKey && !hasOAuthToken) {
+  if (wanted.has('CLAUDE_CODE_OAUTH_TOKEN') && !hasApiKey && !hasOAuthToken) {
     const token = readClaudeOAuthToken();
     if (token) {
       result.CLAUDE_CODE_OAUTH_TOKEN = token;

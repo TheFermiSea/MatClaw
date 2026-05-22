@@ -162,6 +162,27 @@ function buildVolumeMounts(
     readonly: false,
   });
 
+  const groupClaudeConfigFile = path.join(
+    DATA_DIR,
+    'sessions',
+    group.folder,
+    '.claude.json',
+  );
+  if (!fs.existsSync(groupClaudeConfigFile)) {
+    const hostClaudeConfigFile = path.join(homeDir, '.claude.json');
+    fs.mkdirSync(path.dirname(groupClaudeConfigFile), { recursive: true });
+    if (fs.existsSync(hostClaudeConfigFile)) {
+      fs.copyFileSync(hostClaudeConfigFile, groupClaudeConfigFile);
+    } else {
+      fs.writeFileSync(groupClaudeConfigFile, '{}\n');
+    }
+  }
+  mounts.push({
+    hostPath: groupClaudeConfigFile,
+    containerPath: '/home/node/.claude.json',
+    readonly: false,
+  });
+
   // Gmail credentials directory (for Gmail MCP inside the container)
   const gmailDir = path.join(homeDir, '.gmail-mcp');
   if (fs.existsSync(gmailDir)) {
@@ -273,7 +294,6 @@ function buildVolumeMounts(
 function readSecrets(): Record<string, string> {
   return readEnvFile([
     // Claude Agent SDK
-    'CLAUDE_CODE_OAUTH_TOKEN',
     'ANTHROPIC_API_KEY',
     'ANTHROPIC_BASE_URL',
     // Codex SDK (OpenAI-compatible)
