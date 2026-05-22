@@ -75,7 +75,15 @@ function readClaudeOAuthToken(): string | undefined {
     path.join(home, '.claude', '.credentials.json'),
     path.join(home, '.claude', 'credentials.json'),
     ...(process.platform === 'darwin'
-      ? [path.join(home, 'Library', 'Application Support', 'Claude', 'credentials.json')]
+      ? [
+          path.join(
+            home,
+            'Library',
+            'Application Support',
+            'Claude',
+            'credentials.json',
+          ),
+        ]
       : []),
     path.join(home, '.config', 'claude', 'credentials.json'),
   ];
@@ -95,7 +103,10 @@ function readClaudeOAuthToken(): string | undefined {
       if (expiresAt) {
         const expiresMs = expiresAt > 1e12 ? expiresAt : expiresAt * 1000;
         if (Date.now() > expiresMs) {
-          logger.warn({ file: credFile }, 'Claude OAuth token expired, skipping');
+          logger.warn(
+            { file: credFile },
+            'Claude OAuth token expired, skipping',
+          );
           continue;
         }
       }
