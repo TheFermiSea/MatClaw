@@ -45,6 +45,7 @@ interface ContainerOutput {
 const IPC_INPUT_DIR = '/workspace/ipc/input';
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_SECRETS_PATH = '/workspace/ipc/_secrets.json';
+const CLAUDE_CREDENTIALS_PATH = '/home/node/.claude/.credentials.json';
 const IPC_POLL_MS = 500;
 const MANAGED_SDK_ENV_KEYS = [
   'AGENT_MODEL',
@@ -136,31 +137,86 @@ function waitForIpcMessage(): Promise<string | null> {
   });
 }
 
+function readClaudeOAuthToken(): { present: boolean; expired: boolean; token?: string } {
+  try {
+    if (!fs.existsSync(CLAUDE_CREDENTIALS_PATH)) {
+      return { present: false, expired: false };
+    }
+    const data = JSON.parse(fs.readFileSync(CLAUDE_CREDENTIALS_PATH, 'utf-8')) as Record<string, unknown>;
+    const oauth = (data['claudeAiOauth'] ?? data['oauth'] ?? data) as Record<string, unknown>;
+    const token = oauth['accessToken'] ?? oauth['access_token'];
+    const expiresAt = oauth['expiresAt'] ?? oauth['expires_at'];
+    let expired = false;
+
+    if (typeof expiresAt === 'number') {
+      const expiresMs = expiresAt > 1e12 ? expiresAt : expiresAt * 1000;
+      expired = Date.now() > expiresMs;
+    }
+
+    return {
+      present: true,
+      expired,
+      token: !expired && typeof token === 'string' && token ? token : undefined,
+    };
+  } catch {
+    return { present: true, expired: false };
+  }
+}
+
+function refreshClaudeOAuthFromCredentialFile(sdkEnv: Record<string, string | undefined>): boolean {
+  const oauth = readClaudeOAuthToken();
+  if (!oauth.present) return false;
+
+  if (oauth.token) {
+    if (sdkEnv['CLAUDE_CODE_OAUTH_TOKEN'] !== oauth.token) {
+      sdkEnv['CLAUDE_CODE_OAUTH_TOKEN'] = oauth.token;
+      return true;
+    }
+    return false;
+  }
+
+  // Do not keep using a stale token from IPC after the mounted Claude
+  // credential file says the access token has expired. With the env var
+  // removed, Claude Code can fall back to the credentials file/refresh token.
+  if (oauth.expired && sdkEnv['CLAUDE_CODE_OAUTH_TOKEN'] !== undefined) {
+    delete sdkEnv['CLAUDE_CODE_OAUTH_TOKEN'];
+    log('Dropped expired Claude OAuth token from SDK env');
+    return true;
+  }
+
+  return false;
+}
+
 function refreshSdkEnv(sdkEnv: Record<string, string | undefined>): void {
   try {
-    if (!fs.existsSync(IPC_SECRETS_PATH)) return;
-    const secrets = JSON.parse(fs.readFileSync(IPC_SECRETS_PATH, 'utf-8')) as Record<string, unknown>;
     let updated = false;
 
-    // Full sync: remove stale auth/base-url/model values that are no longer
-    // present on the host, otherwise an old OAuth token or base URL can linger
-    // and break the next resumed turn with a 401.
-    for (const key of MANAGED_SDK_ENV_KEYS) {
-      const nextValue = secrets[key];
-      if (typeof nextValue !== 'string' || !nextValue) {
-        if (sdkEnv[key] !== undefined) {
-          delete sdkEnv[key];
+    if (fs.existsSync(IPC_SECRETS_PATH)) {
+      const secrets = JSON.parse(fs.readFileSync(IPC_SECRETS_PATH, 'utf-8')) as Record<string, unknown>;
+
+      // Full sync: remove stale auth/base-url/model values that are no longer
+      // present on the host, otherwise an old OAuth token or base URL can linger
+      // and break the next resumed turn with a 401.
+      for (const key of MANAGED_SDK_ENV_KEYS) {
+        const nextValue = secrets[key];
+        if (typeof nextValue !== 'string' || !nextValue) {
+          if (sdkEnv[key] !== undefined) {
+            delete sdkEnv[key];
+            updated = true;
+          }
+        }
+      }
+
+      for (const [key, value] of Object.entries(secrets)) {
+        if (typeof value === 'string' && sdkEnv[key] !== value) {
+          sdkEnv[key] = value;
           updated = true;
         }
       }
     }
 
-    for (const [key, value] of Object.entries(secrets)) {
-      if (typeof value === 'string' && sdkEnv[key] !== value) {
-        sdkEnv[key] = value;
-        updated = true;
-      }
-    }
+    updated = refreshClaudeOAuthFromCredentialFile(sdkEnv) || updated;
+
     if (updated) {
       log('Refreshed SDK secrets from IPC');
     }
