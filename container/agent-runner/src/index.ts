@@ -50,6 +50,7 @@ const IPC_POLL_MS = 500;
 const MANAGED_SDK_ENV_KEYS = [
   'AGENT_MODEL',
   'CLAUDE_CODE_OAUTH_TOKEN',
+  'ANTHROPIC_AUTH_TOKEN',
   'ANTHROPIC_API_KEY',
   'ANTHROPIC_BASE_URL',
   'CODEX_API_KEY',
@@ -151,6 +152,7 @@ function hasClaudeCredentialsFile(): boolean {
 function preferClaudeCredentialsFile(sdkEnv: Record<string, string | undefined>): boolean {
   if (
     !sdkEnv['ANTHROPIC_API_KEY'] &&
+    !sdkEnv['ANTHROPIC_AUTH_TOKEN'] &&
     sdkEnv['CLAUDE_CODE_OAUTH_TOKEN'] !== undefined &&
     hasClaudeCredentialsFile()
   ) {

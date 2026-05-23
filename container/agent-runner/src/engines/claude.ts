@@ -129,7 +129,12 @@ function formatTranscriptMarkdown(messages: ParsedMessage[], title?: string | nu
 
 // ── Hooks ──
 
-const SECRET_ENV_VARS = ['ANTHROPIC_API_KEY', 'ANTHROPIC_BASE_URL', 'CLAUDE_CODE_OAUTH_TOKEN'];
+const SECRET_ENV_VARS = [
+  'ANTHROPIC_API_KEY',
+  'ANTHROPIC_AUTH_TOKEN',
+  'ANTHROPIC_BASE_URL',
+  'CLAUDE_CODE_OAUTH_TOKEN',
+];
 
 function createPreCompactHook(assistantName?: string): HookCallback {
   return async (input) => {

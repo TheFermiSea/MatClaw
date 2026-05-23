@@ -170,7 +170,7 @@ export class GroupQueue {
     const secrets = readEnvFile([
       'AGENT_ENGINE',
       'AGENT_MODEL',
-      'CLAUDE_CODE_OAUTH_TOKEN',
+      'ANTHROPIC_AUTH_TOKEN',
       'ANTHROPIC_API_KEY',
       'ANTHROPIC_BASE_URL',
       'CODEX_API_KEY',
