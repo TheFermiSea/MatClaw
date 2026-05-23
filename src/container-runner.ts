@@ -294,6 +294,7 @@ function buildVolumeMounts(
 function readSecrets(): Record<string, string> {
   return readEnvFile([
     // Claude Agent SDK
+    'ANTHROPIC_AUTH_TOKEN',
     'ANTHROPIC_API_KEY',
     'ANTHROPIC_BASE_URL',
     // Codex SDK (OpenAI-compatible)
