@@ -155,6 +155,17 @@ function getAgentCursorKey(chatJid: string, threadId?: string): string {
   return chatJid;
 }
 
+function isInvalidThinkingSignature(output: ContainerOutput): boolean {
+  const result =
+    typeof output.result === 'string'
+      ? output.result
+      : output.result
+        ? JSON.stringify(output.result)
+        : '';
+  const text = `${result}\n${output.error || ''}`;
+  return /Invalid `?signature`? in `?thinking`? block/i.test(text);
+}
+
 function deleteAndReplaceWebChatThread(threadId: string):
   | {
       deletedThreadId: string;
@@ -672,6 +683,33 @@ async function runAgent(
   // must not re-save the old session ID).
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
+        if (isInvalidThinkingSignature(output)) {
+          if (sessions[group.folder]) {
+            previousSessions[group.folder] = sessions[group.folder];
+          }
+          queue.markSessionCleared(chatJid);
+          delete sessions[group.folder];
+          deleteSession(group.folder);
+
+          const state = queue.getState(chatJid);
+          if (state?.active && state.process) {
+            state.process.kill('SIGTERM');
+            if (state.containerName) killContainer(state.containerName);
+          }
+
+          logger.warn(
+            { group: group.name },
+            'Claude session rejected due to invalid thinking signature; cleared stored session',
+          );
+          await onOutput({
+            ...output,
+            status: 'error',
+            result:
+              'Claude rejected the saved session history because a signed thinking block no longer validates. I cleared the stored session; send the message again to start a fresh MatClaw session.',
+          });
+          return;
+        }
+
         if (output.newSessionId && !queue.isSessionCleared(chatJid)) {
           sessions[group.folder] = output.newSessionId;
           setSession(group.folder, output.newSessionId);
