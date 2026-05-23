@@ -193,6 +193,37 @@ function buildVolumeMounts(
     });
   }
 
+  // NotebookLM CLI/MCP credentials (from `nlm login` on host).
+  // Mounted writable because the session cookies may be refreshed.
+  for (const dirName of ['.notebooklm-mcp-cli', '.nlm']) {
+    const notebookLmDir = path.join(homeDir, dirName);
+    if (fs.existsSync(notebookLmDir)) {
+      mounts.push({
+        hostPath: notebookLmDir,
+        containerPath: `/home/node/${dirName}`,
+        readonly: false,
+      });
+    }
+  }
+
+  // Asta CLI credentials and local cache.
+  const astaConfigDir = path.join(homeDir, '.config', 'asta-cli');
+  if (fs.existsSync(astaConfigDir)) {
+    mounts.push({
+      hostPath: astaConfigDir,
+      containerPath: '/home/node/.config/asta-cli',
+      readonly: false,
+    });
+  }
+  const astaHomeDir = path.join(homeDir, '.asta');
+  if (fs.existsSync(astaHomeDir)) {
+    mounts.push({
+      hostPath: astaHomeDir,
+      containerPath: '/home/node/.asta',
+      readonly: false,
+    });
+  }
+
   // Codex OAuth credentials (from `codex login` on host)
   // Mounted read-only so the Codex CLI can authenticate without an API key.
   // The CodexEngine writes config.toml separately for MCP server config.
@@ -297,6 +328,11 @@ function readSecrets(): Record<string, string> {
     'ANTHROPIC_AUTH_TOKEN',
     'ANTHROPIC_API_KEY',
     'ANTHROPIC_BASE_URL',
+    // Asta CLI / agent auth
+    'ASTA_TOKEN',
+    'ASTA_API_KEY',
+    'ASTA_A2A_API_KEY',
+    'ASTA_GATEWAY_URL',
     // Codex SDK (OpenAI-compatible)
     'CODEX_API_KEY',
     'OPENAI_API_KEY',
