@@ -72,6 +72,10 @@ systemctl --user restart matclaw
 
 **WhatsApp not connecting after upgrade:** WhatsApp is now a separate skill, not bundled in core. Run `/add-whatsapp` (or `npx tsx scripts/apply-skill.ts .claude/skills/add-whatsapp && npm run build`) to install it. Existing auth credentials and groups are preserved.
 
+**Agent does not acknowledge new prompts:** Check for an active container blocked in a long Bash tool call. Interactive MatClaw turns must stay steerable; do not monitor HPC jobs with `sleep 300`, `sleep 7200`, or similar foreground commands. Use `mcp__matclaw__schedule_task` for periodic job checks, or run short direct status checks (`squeue`, `sacct`, `tail`) and then return control to the chat. New user messages are delivered through `/workspace/ipc/input`; stale `_close` sentinels should not remain when a follow-up message is queued.
+
+**HPC monitoring policy:** Long-running calculations belong in SLURM. Long-running monitors belong in MatClaw scheduled tasks or external polling, not inside the interactive agent's Bash command. The interactive agent should acknowledge user steering promptly and should never block the foreground turn waiting hours for a job to finish.
+
 ## Container Build Cache
 
 The container buildkit caches the build context aggressively. `--no-cache` alone does NOT invalidate COPY steps — the builder's volume retains stale files. To force a truly clean rebuild, prune the builder then re-run `./container/build.sh`.

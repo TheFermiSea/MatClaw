@@ -165,6 +165,22 @@ function createSanitizeBashHook(): HookCallback {
     const preInput = input as PreToolUseHookInput;
     const command = (preInput.tool_input as { command?: string })?.command;
     if (!command) return {};
+
+    const maxSleepSeconds = parseInt(
+      process.env['MATCLAW_INTERACTIVE_MAX_SLEEP_SECONDS'] || '120',
+      10,
+    );
+    const longSleep = findLongSleep(command, maxSleepSeconds);
+    if (longSleep !== null) {
+      return {
+        decision: 'block',
+        reason:
+          `Blocked foreground sleep of ${longSleep}s. ` +
+          'Do not monitor HPC jobs with long sleep commands inside the interactive MatClaw turn. ' +
+          'Use mcp__matclaw__schedule_task or a short status check instead so the user can steer the agent.',
+      };
+    }
+
     const unsetPrefix = `unset ${SECRET_ENV_VARS.join(' ')} 2>/dev/null; `;
     return {
       hookSpecificOutput: {
@@ -176,6 +192,22 @@ function createSanitizeBashHook(): HookCallback {
       },
     };
   };
+}
+
+function findLongSleep(command: string, maxSeconds: number): number | null {
+  if (!Number.isFinite(maxSeconds) || maxSeconds <= 0) return null;
+
+  const sleepPattern = /(?:^|[\s;&|()])sleep\s+([0-9]+)([smhd]?)(?=$|[\s;&|()'"])/gi;
+  let match: RegExpExecArray | null;
+  while ((match = sleepPattern.exec(command)) !== null) {
+    const value = parseInt(match[1], 10);
+    const unit = match[2].toLowerCase();
+    const multiplier = unit === 'd' ? 86400 : unit === 'h' ? 3600 : unit === 'm' ? 60 : 1;
+    const seconds = value * multiplier;
+    if (seconds > maxSeconds) return seconds;
+  }
+
+  return null;
 }
 
 // ── Claude Engine ──

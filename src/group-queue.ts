@@ -229,6 +229,14 @@ export class GroupQueue {
     const inputDir = path.join(DATA_DIR, 'ipc', state.groupFolder, 'input');
     try {
       fs.mkdirSync(inputDir, { recursive: true });
+      // A close sentinel is only valid while the active container is idle. If a
+      // user sends a follow-up, clear any stale sentinel so it cannot cause the
+      // agent runner to exit before consuming the new message.
+      try {
+        fs.unlinkSync(path.join(inputDir, '_close'));
+      } catch {
+        // ignore: absent or already consumed
+      }
       const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}.json`;
       const filepath = path.join(inputDir, filename);
       const tempPath = `${filepath}.tmp`;

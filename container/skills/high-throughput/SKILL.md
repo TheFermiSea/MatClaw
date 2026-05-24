@@ -1,6 +1,6 @@
 ---
 name: high-throughput
-description: High-Throughput Computational Workflows (8 sub-skills: batch-calculations, batch-screening, convergence-automation, materials-filtering, matpes-dual-static, phase-stability, property-prediction, screening-workflow)
+description: High-Throughput Computational Workflows (9 sub-skills: batch-calculations, batch-screening, convergence-automation, materials-filtering, matpes-dual-static, phase-stability, property-prediction, screening-workflow, slurm-monitoring)
 ---
 
 # High-Throughput Computational Workflows
@@ -17,6 +17,7 @@ description: High-Throughput Computational Workflows (8 sub-skills: batch-calcul
 | Materials Filtering | [materials-filtering/SKILL.md](materials-filtering/SKILL.md) | Query and filter the Materials Project database: chemical system search, property ranges, stability criteria, export structures and data |
 | Convergence Automation | [convergence-automation/SKILL.md](convergence-automation/SKILL.md) | Automated DFT convergence testing: sweep ecutwfc and k-grids, find optimal parameters via energy-per-atom threshold (1 meV/atom), combined cutoff-then-kgrid workflow, batch mode for multiple materials, convergence plots and JSON reports. Inspired by pyiron_atomistics ConvEncutParallel/ConvKpointParallel. |
 | MatPES Dual Static | [matpes-dual-static/SKILL.md](matpes-dual-static/SKILL.md) | Dual-functional PBE + r2SCAN static calculations: run PBE first, reuse wavefunction for efficient r2SCAN, optional PBE+U, collect energies at two levels of theory for ML training data or cross-validation |
+| SLURM Monitoring | [slurm-monitoring/SKILL.md](slurm-monitoring/SKILL.md) | Keep MatClaw responsive while watching HPC jobs: short status checks, scheduled polling, completion reports, and safe handling of VASP/YAMBO/Wannier90/BerryPy workflows without blocking the interactive chat |
 
 ## General Pattern
 
@@ -51,6 +52,9 @@ Need both PBE and r2SCAN energies efficiently (ML training data, cross-validatio
 
 Determine optimal ecutwfc / k-grid for a new material or pseudopotential?
   --> convergence-automation/ (automated sweeps, threshold-based selection, batch mode)
+
+Need to watch a SLURM job or prepare delayed follow-up checks?
+  --> slurm-monitoring/ (short foreground checks + scheduled polling; no long sleeps in chat)
 ```
 
 ## Prerequisites

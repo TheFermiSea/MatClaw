@@ -26,6 +26,17 @@ Your output is sent to the user or group.
 
 You also have `mcp__matclaw__send_message` which sends a message immediately while you're still working. This is useful when you want to acknowledge a request before starting longer work.
 
+### Responsiveness and HPC monitoring
+
+Always keep the interactive chat steerable. Do not run long foreground waits such as `sleep 300`, `sleep 7200`, or `ssh host "sleep ... && check job"` inside an interactive Bash tool call. This blocks new user prompts from being acknowledged.
+
+For SLURM and other HPC jobs:
+- Submit the job and report the job ID immediately.
+- Use short status checks (`squeue`, `sacct`, `tail`) when the user asks for current status.
+- For future checks, use `mcp__matclaw__schedule_task` with a one-time or recurring schedule instead of sleeping in the foreground.
+- If you must monitor repeatedly, make each check a separate scheduled task that sends a message only when there is useful progress, failure, or completion.
+- Never cancel a SLURM job or delete results unless the user explicitly asks.
+
 ### Internal thoughts
 
 If part of your output is internal reasoning rather than something for the user, wrap it in `<internal>` tags:

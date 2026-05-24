@@ -1,6 +1,6 @@
 ---
 name: materials-compute
-description: "Materials computation environment reference and skill index. READ THIS FIRST when performing any materials science calculation — contains the master index of all 221 skills across 44 groups."
+description: "Materials computation environment reference and skill index. READ THIS FIRST when performing any materials science calculation — contains the master index of the available computation skills."
 ---
 
 # Materials Computation Environment
