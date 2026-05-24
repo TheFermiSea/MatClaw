@@ -395,8 +395,20 @@ export class WhatsAppChannel implements Channel {
   }
 }
 
+function hasUsableWhatsAppAuth(): boolean {
+  const credsPath = path.join(STORE_DIR, 'auth', 'creds.json');
+  try {
+    const raw = fs.readFileSync(credsPath, 'utf-8');
+    if (!raw.trim()) return false;
+    const creds = JSON.parse(raw) as { me?: { id?: string } };
+    return Boolean(creds.me?.id);
+  } catch {
+    return false;
+  }
+}
+
 registerChannel('whatsapp', (opts: ChannelOpts) => {
-  if (!fs.existsSync(path.join(STORE_DIR, 'auth', 'creds.json'))) {
+  if (!hasUsableWhatsAppAuth()) {
     return null;
   }
   return new WhatsAppChannel(opts);
