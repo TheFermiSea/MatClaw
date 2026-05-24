@@ -12,6 +12,7 @@ const STEPS: Record<
   environment: () => import('./environment.js'),
   'configure-api': () => import('./configure-api.js'),
   container: () => import('./container.js'),
+  'whatsapp-auth': () => import('./whatsapp-auth.js'),
   groups: () => import('./groups.js'),
   register: () => import('./register.js'),
   mounts: () => import('./mounts.js'),
