@@ -64,7 +64,9 @@ async function readStdin(): Promise<string> {
   return new Promise((resolve, reject) => {
     let data = '';
     process.stdin.setEncoding('utf8');
-    process.stdin.on('data', chunk => { data += chunk; });
+    process.stdin.on('data', (chunk) => {
+      data += chunk;
+    });
     process.stdin.on('end', () => resolve(data));
     process.stdin.on('error', reject);
   });
@@ -86,7 +88,11 @@ function log(message: string): void {
 
 function shouldClose(): boolean {
   if (fs.existsSync(IPC_INPUT_CLOSE_SENTINEL)) {
-    try { fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL); } catch { /* ignore */ }
+    try {
+      fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL);
+    } catch {
+      /* ignore */
+    }
     return true;
   }
   return false;
@@ -95,8 +101,9 @@ function shouldClose(): boolean {
 function drainIpcInput(): string[] {
   try {
     fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
-    const files = fs.readdirSync(IPC_INPUT_DIR)
-      .filter(f => f.endsWith('.json'))
+    const files = fs
+      .readdirSync(IPC_INPUT_DIR)
+      .filter((f) => f.endsWith('.json'))
       .sort();
 
     const messages: string[] = [];
@@ -109,8 +116,14 @@ function drainIpcInput(): string[] {
           messages.push(data.text);
         }
       } catch (err) {
-        log(`Failed to process input file ${file}: ${err instanceof Error ? err.message : String(err)}`);
-        try { fs.unlinkSync(filePath); } catch { /* ignore */ }
+        log(
+          `Failed to process input file ${file}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        try {
+          fs.unlinkSync(filePath);
+        } catch {
+          /* ignore */
+        }
       }
     }
     return messages;
@@ -141,15 +154,45 @@ function waitForIpcMessage(): Promise<string | null> {
 function hasClaudeCredentialsFile(): boolean {
   try {
     if (!fs.existsSync(CLAUDE_CREDENTIALS_PATH)) return false;
-    const data = JSON.parse(fs.readFileSync(CLAUDE_CREDENTIALS_PATH, 'utf-8')) as Record<string, unknown>;
-    const oauth = (data['claudeAiOauth'] ?? data['oauth'] ?? data) as Record<string, unknown>;
+    const data = JSON.parse(
+      fs.readFileSync(CLAUDE_CREDENTIALS_PATH, 'utf-8'),
+    ) as Record<string, unknown>;
+    const oauth = (data['claudeAiOauth'] ?? data['oauth'] ?? data) as Record<
+      string,
+      unknown
+    >;
     return Boolean(oauth['refreshToken'] ?? oauth['refresh_token']);
   } catch {
     return false;
   }
 }
 
-function preferClaudeCredentialsFile(sdkEnv: Record<string, string | undefined>): boolean {
+function normalizeAnthropicSdkAuth(
+  sdkEnv: Record<string, string | undefined>,
+): boolean {
+  let updated = false;
+
+  // CLIAPIProxy accepts the proxy key as either Bearer auth or x-api-key.
+  // Claude Agent SDK keys off ANTHROPIC_API_KEY; if only ANTHROPIC_AUTH_TOKEN
+  // is present it can fall back to a mounted stale OAuth credentials file.
+  if (!sdkEnv['ANTHROPIC_API_KEY'] && sdkEnv['ANTHROPIC_AUTH_TOKEN']) {
+    sdkEnv['ANTHROPIC_API_KEY'] = sdkEnv['ANTHROPIC_AUTH_TOKEN'];
+    updated = true;
+  }
+
+  if (sdkEnv['ANTHROPIC_API_KEY'] || sdkEnv['ANTHROPIC_AUTH_TOKEN']) {
+    if (sdkEnv['CLAUDE_CODE_OAUTH_TOKEN'] !== undefined) {
+      delete sdkEnv['CLAUDE_CODE_OAUTH_TOKEN'];
+      updated = true;
+    }
+  }
+
+  return updated;
+}
+
+function preferClaudeCredentialsFile(
+  sdkEnv: Record<string, string | undefined>,
+): boolean {
   if (
     !sdkEnv['ANTHROPIC_API_KEY'] &&
     !sdkEnv['ANTHROPIC_AUTH_TOKEN'] &&
@@ -157,7 +200,9 @@ function preferClaudeCredentialsFile(sdkEnv: Record<string, string | undefined>)
     hasClaudeCredentialsFile()
   ) {
     delete sdkEnv['CLAUDE_CODE_OAUTH_TOKEN'];
-    log('Using Claude credentials file instead of short-lived OAuth token env var');
+    log(
+      'Using Claude credentials file instead of short-lived OAuth token env var',
+    );
     return true;
   }
 
@@ -169,7 +214,9 @@ function refreshSdkEnv(sdkEnv: Record<string, string | undefined>): void {
     let updated = false;
 
     if (fs.existsSync(IPC_SECRETS_PATH)) {
-      const secrets = JSON.parse(fs.readFileSync(IPC_SECRETS_PATH, 'utf-8')) as Record<string, unknown>;
+      const secrets = JSON.parse(
+        fs.readFileSync(IPC_SECRETS_PATH, 'utf-8'),
+      ) as Record<string, unknown>;
 
       // Full sync: remove stale auth/base-url/model values that are no longer
       // present on the host, otherwise an old OAuth token or base URL can linger
@@ -192,6 +239,7 @@ function refreshSdkEnv(sdkEnv: Record<string, string | undefined>): void {
       }
     }
 
+    updated = normalizeAnthropicSdkAuth(sdkEnv) || updated;
     updated = preferClaudeCredentialsFile(sdkEnv) || updated;
 
     if (updated) {
@@ -234,13 +282,17 @@ async function main(): Promise<void> {
     const stdinData = await readStdin();
     containerInput = JSON.parse(stdinData);
     // Delete the temp file the entrypoint wrote — it contains secrets
-    try { fs.unlinkSync('/tmp/input.json'); } catch { /* may not exist */ }
+    try {
+      fs.unlinkSync('/tmp/input.json');
+    } catch {
+      /* may not exist */
+    }
     log(`Received input for group: ${containerInput.groupFolder}`);
   } catch (err) {
     writeOutput({
       status: 'error',
       result: null,
-      error: `Failed to parse input: ${err instanceof Error ? err.message : String(err)}`
+      error: `Failed to parse input: ${err instanceof Error ? err.message : String(err)}`,
     });
     process.exit(1);
   }
@@ -253,9 +305,15 @@ async function main(): Promise<void> {
   }
 
   // Persist fresh secrets to IPC so refreshSdkEnv() doesn't overwrite with stale tokens
-  if (containerInput.secrets && Object.keys(containerInput.secrets).length > 0) {
+  if (
+    containerInput.secrets &&
+    Object.keys(containerInput.secrets).length > 0
+  ) {
     try {
-      fs.writeFileSync(IPC_SECRETS_PATH, JSON.stringify(containerInput.secrets));
+      fs.writeFileSync(
+        IPC_SECRETS_PATH,
+        JSON.stringify(containerInput.secrets),
+      );
     } catch {
       // Non-fatal: refreshSdkEnv will still work with stdin secrets in sdkEnv
     }
@@ -268,7 +326,11 @@ async function main(): Promise<void> {
   fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
 
   // Clean up stale _close sentinel from previous container runs
-  try { fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL); } catch { /* ignore */ }
+  try {
+    fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL);
+  } catch {
+    /* ignore */
+  }
 
   // Build initial prompt (drain any pending IPC messages too)
   let prompt = containerInput.prompt;
@@ -306,9 +368,16 @@ async function main(): Promise<void> {
     while (true) {
       // Refresh secrets before each query so we use the latest OAuth token
       refreshSdkEnv(sdkEnv);
-      log(`Starting query (engine: ${engine.name}, session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
+      log(
+        `Starting query (engine: ${engine.name}, session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`,
+      );
 
-      const queryResult = await engine.runQuery(prompt, sessionId, ctx, resumeAt);
+      const queryResult = await engine.runQuery(
+        prompt,
+        sessionId,
+        ctx,
+        resumeAt,
+      );
       if (queryResult.newSessionId) {
         sessionId = queryResult.newSessionId;
       }
@@ -346,7 +415,7 @@ async function main(): Promise<void> {
       status: 'error',
       result: null,
       newSessionId: sessionId,
-      error: errorMessage
+      error: errorMessage,
     });
     process.exit(1);
   }

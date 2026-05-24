@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { EventEmitter } from 'events';
-import { PassThrough } from 'stream';
+import { PassThrough, Writable } from 'stream';
 
 // Sentinel markers must match container-runner.ts
 const OUTPUT_START_MARKER = '---MATCLAW_OUTPUT_START---';
@@ -8,6 +8,8 @@ const OUTPUT_END_MARKER = '---MATCLAW_OUTPUT_END---';
 
 // Mock config
 vi.mock('./config.js', () => ({
+  AGENT_ENGINE: 'claude',
+  AGENT_MODEL: '',
   CONTAINER_IMAGE: 'matclaw-agent:latest',
   CONTAINER_IMAGE_REMOTE: 'ghcr.io/dingyanglyu/matclaw-agent:latest',
   CONTAINER_GPU: false,
@@ -43,6 +45,14 @@ vi.mock('fs', async () => {
       readdirSync: vi.fn(() => []),
       statSync: vi.fn(() => ({ isDirectory: () => false })),
       copyFileSync: vi.fn(),
+      createWriteStream: vi.fn(
+        () =>
+          new Writable({
+            write(_chunk, _encoding, callback) {
+              callback();
+            },
+          }),
+      ),
     },
   };
 });
