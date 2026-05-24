@@ -190,6 +190,7 @@ export async function run(args: string[]): Promise<void> {
   });
 
   const logFile = path.join(projectRoot, 'logs', 'setup.log');
+  fs.mkdirSync(path.dirname(logFile), { recursive: true });
   const logStream = fs.createWriteStream(logFile, { flags: 'a' });
   authProc.stdout?.pipe(logStream);
   authProc.stderr?.pipe(logStream);
