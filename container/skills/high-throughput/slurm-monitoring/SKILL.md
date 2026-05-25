@@ -27,6 +27,55 @@ Those patterns block user steering. New user prompts may queue up but will not b
 4. Use `mcp__matclaw__schedule_task` for delayed or repeated checks.
 5. Return control to the chat.
 
+## Storage Policy for SLURM Jobs
+
+For VASP, QE, YAMBO, Wannier90, BerryPy, LAMMPS, RASPA, and other write-heavy
+workflows, do not run directly in the NFS project directory. Use this split:
+
+- NFS/shared project directory: inputs, submission scripts, small logs, final
+  reports, selected output files, plots, and parsed tables.
+- Node-local or cluster scratch: solver execution directory, wavefunctions,
+  charge density, restart databases, trajectories, and temporary files.
+
+On Beefcake, `/home/brian` and `/cluster/shared` are persistent shared storage.
+They are not safe targets for QE `.wfc*`, YAMBO `SAVE/`, VASP `WAVECAR` or
+`CHGCAR`, or bulk trajectories. Stage heavy jobs into `$SLURM_TMPDIR`,
+`$TMPDIR`, or `/scratch/$USER`, then copy selected results back.
+
+Every generated SLURM script should include:
+
+```bash
+set -euo pipefail
+
+PROJECT_NFS="${PROJECT_NFS:-$HOME/projects/my-project}"
+RUN_NAME="${RUN_NAME:-run-${SLURM_JOB_ID:-manual}}"
+PERSIST_DIR="$PROJECT_NFS/runs/$RUN_NAME"
+SCRATCH_BASE="${SLURM_TMPDIR:-${TMPDIR:-/scratch/$USER}}"
+WORKDIR="$SCRATCH_BASE/matclaw/$RUN_NAME"
+
+mkdir -p "$PERSIST_DIR" "$WORKDIR"
+df -h "$PROJECT_NFS" "$SCRATCH_BASE"
+rsync -a "$PERSIST_DIR/input/" "$WORKDIR/"
+
+copy_back() {
+  mkdir -p "$PERSIST_DIR/results"
+  rsync -a \
+    --include='*/' \
+    --include='*.out' --include='*.err' --include='*.xml' \
+    --include='*.json' --include='*.csv' --include='*.png' \
+    --include='CONTCAR' --include='OSZICAR' --include='OUTCAR' \
+    --exclude='*' \
+    "$WORKDIR/" "$PERSIST_DIR/results/"
+}
+trap copy_back EXIT
+
+cd "$WORKDIR"
+```
+
+Copy back large restart artifacts only when the user asks for them. If NFS is
+over 95% full, pause new heavy submissions and report disk usage instead of
+starting another solver run.
+
 ## Short Status Check
 
 Use this when the user asks for current status:
@@ -35,6 +84,7 @@ Use this when the user asks for current status:
 ssh brian@10.0.0.5 "
   squeue -j JOBID -o '%.10i %.9P %.24j %.8u %.8T %.10M %.6D %R' 2>/dev/null || true
   sacct -j JOBID --format=JobID,State,ExitCode,Elapsed,MaxRSS 2>/dev/null || true
+  df -h /home/brian /cluster/shared 2>/dev/null || true
   tail -30 /path/to/job.out 2>/dev/null || true
 "
 ```
@@ -88,5 +138,7 @@ For YAMBO, check the run database/output files requested by the workflow, plus t
 
 - Never cancel a job unless the user explicitly asks.
 - Never delete WAVECAR, WAVEDER, SAVE databases, or large intermediate files unless the user explicitly confirms.
+- Never start a new write-heavy job when shared storage is critically full.
+  Report `df -h` and the largest candidate directories first.
 - If a monitor task discovers new scientific work, write a short memory note in `/workspace/group/` and tell the user what changed.
 - Keep interactive replies short while jobs are running: job ID, state, elapsed time, and next scheduled check.

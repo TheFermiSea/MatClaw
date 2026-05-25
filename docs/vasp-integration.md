@@ -75,6 +75,59 @@ You'll need:
 | Scheduler | `slurm` or `pbs` |
 | Default cores | `16` |
 
+### Storage Layout for HPC Runs
+
+VASP, QE, YAMBO, and other plane-wave workflows can generate tens to hundreds
+of GiB of wavefunctions, charge density, and restart databases. Do not run
+those jobs directly in the MatClaw controller directory, the chat workspace, or
+a shared home/project directory.
+
+Use this split:
+
+| Storage | Purpose |
+|---------|---------|
+| NFS/shared project directory | Canonical inputs, submission scripts, small logs, final structures, parsed data, plots, and selected final artifacts |
+| Node-local or cluster scratch | Solver execution directory, `WAVECAR`, `CHGCAR`, QE `.wfc*`, YAMBO `SAVE/`, trajectories, temporary restart databases |
+| MatClaw controller storage | Chat state, scheduler state, credentials, and small notes only |
+
+For the Beefcake `vasp-0x` nodes, treat `/home/brian` and `/cluster/shared` as
+persistent shared storage. Heavy solver intermediates should be staged to
+`$SLURM_TMPDIR`, `$TMPDIR`, or `/scratch/$USER` on the allocated node, then
+selected results should be copied back.
+
+Generated SLURM scripts should follow this pattern:
+
+```bash
+PROJECT_NFS="${PROJECT_NFS:-$HOME/projects/NbOCl2}"
+RUN_NAME="${RUN_NAME:-vasp-${SLURM_JOB_ID:-manual}}"
+PERSIST_DIR="$PROJECT_NFS/runs/$RUN_NAME"
+SCRATCH_BASE="${SLURM_TMPDIR:-${TMPDIR:-/scratch/$USER}}"
+WORKDIR="$SCRATCH_BASE/matclaw/$RUN_NAME"
+
+mkdir -p "$PERSIST_DIR" "$WORKDIR"
+df -h "$PROJECT_NFS" "$SCRATCH_BASE"
+rsync -a "$PERSIST_DIR/input/" "$WORKDIR/"
+
+copy_back() {
+  mkdir -p "$PERSIST_DIR/results"
+  rsync -a \
+    --include='*/' \
+    --include='INCAR' --include='POSCAR' --include='KPOINTS' \
+    --include='OUTCAR' --include='OSZICAR' --include='CONTCAR' \
+    --include='vasprun.xml' --include='*.out' --include='*.err' \
+    --include='*.json' --include='*.csv' --include='*.png' \
+    --exclude='*' \
+    "$WORKDIR/" "$PERSIST_DIR/results/"
+}
+trap copy_back EXIT
+
+cd "$WORKDIR"
+srun vasp_std > vasp.out 2>&1
+```
+
+Only copy `WAVECAR`, `CHGCAR`, or other large restart artifacts back to NFS
+when the user explicitly needs them for a follow-up calculation.
+
 ### Local Mode Configuration
 
 You'll need:
@@ -139,4 +192,5 @@ Without VASP, the agent automatically uses Method A or B. VASP adds another high
 | Permission denied (publickey) | Check key permissions: `chmod 600 ~/.ssh/id_rsa` |
 | Job stuck in PENDING | Try a different queue: `vasp-remote run --queue express` |
 | `vasp_std: command not found` | Verify VASP path: `ssh user@host "ls /path/to/vasp_std"` |
+| Shared storage fills during a run | Move the job work directory to scratch; copy back only final artifacts |
 | Library errors (local mode) | Switch to SSH mode to avoid container/host library mismatch |

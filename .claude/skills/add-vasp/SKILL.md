@@ -49,6 +49,29 @@ Ask the user for:
 | Default walltime | `24:00:00` | No (default: 24:00:00) |
 | Modules to load | `vasp/6.4.3 intel/2024` | No |
 
+### Storage policy
+
+For SSH/HPC mode, require a scratch/work directory that is not a shared home
+or MatClaw controller path. On Beefcake, `/home/brian` and `/cluster/shared`
+are persistent shared storage; use them for inputs and final artifacts, not
+for high-write VASP execution. Prefer `$SLURM_TMPDIR`, `$TMPDIR`, or
+`/scratch/$USER/matclaw-vasp` on the allocated `vasp-0x` node.
+
+If the user gives a work directory under `$HOME`, `/home/brian`,
+`/cluster/shared`, the MatClaw source tree, or the controller workspace, warn
+that VASP can fill that filesystem with `WAVECAR`, `CHGCAR`, and `vasprun.xml`.
+Ask for a scratch path before continuing.
+
+The VASP remote workflow should:
+
+1. Keep canonical inputs and final summaries on NFS/shared project storage.
+2. Stage each job into a per-job scratch directory.
+3. Run `srun vasp_std` or the site-specific VASP launcher from scratch.
+4. Copy back `OUTCAR`, `OSZICAR`, `CONTCAR`, `vasprun.xml`, small logs, plots,
+   and parsed tables.
+5. Copy `WAVECAR` or `CHGCAR` back only when the user explicitly needs restart
+   files for a follow-up calculation.
+
 ### Write configuration
 
 ```bash
@@ -253,6 +276,7 @@ All 213 computation skills with VASP methods work automatically — they generat
 | `vasp_std: not found` | Wrong binary path | Check `ssh user@host "which vasp_std"` |
 | `sbatch: command not found` | Wrong scheduler type | Try `pbs` instead of `slurm` |
 | Job stuck in PENDING | Queue full | Try different queue: `vasp-remote run --queue express` |
+| Shared storage fills up | Work directory is on NFS/home | Move `work_dir` to `$SLURM_TMPDIR`, `$TMPDIR`, or `/scratch/$USER`; copy back selected outputs only |
 | Dynamic library errors (local) | Container lib mismatch | Use SSH mode instead |
 
 ## Removal

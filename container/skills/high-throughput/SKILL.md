@@ -27,6 +27,22 @@ description: High-Throughput Computational Workflows (9 sub-skills: batch-calcul
 4. **Validate** -- run Quantum ESPRESSO (or VASP) DFT on the short-listed candidates.
 5. **Report** -- export CSV/JSON, generate plots, build property tables.
 
+## Storage Policy
+
+High-throughput DFT can fill shared storage quickly. Keep persistent state and
+heavy scratch separate:
+
+- Put candidate lists, generated inputs, metadata, summaries, plots, and final
+  tables in NFS/shared project storage.
+- Put solver execution directories, QE `outdir`, QE `.wfc*`, YAMBO `SAVE/`,
+  VASP `WAVECAR`/`CHGCAR`, and trajectories in node-local or cluster scratch.
+- On Beefcake, do not write high-throughput scratch directly under
+  `/home/brian` or `/cluster/shared`; stage each SLURM job into
+  `$SLURM_TMPDIR`, `$TMPDIR`, or `/scratch/$USER`, then copy selected results
+  back.
+- If shared storage is over 95% full, pause new DFT submissions and report disk
+  usage before continuing.
+
 ## Method Decision Guide
 
 ```

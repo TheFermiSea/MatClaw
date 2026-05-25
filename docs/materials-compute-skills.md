@@ -22,6 +22,28 @@ The container includes the following pre-installed tools:
 | mp-api | Materials Project database access |
 | Miniconda | Flexible package management for additional tools |
 
+## HPC Storage Policy
+
+Materials workflows must keep persistent project data separate from
+write-heavy solver scratch.
+
+- Use NFS/shared project storage for canonical inputs, scripts, small logs,
+  final structures, parsed CSV/JSON tables, plots, and selected final artifacts.
+- Use node-local or cluster scratch for solver execution directories,
+  wavefunctions, charge density, YAMBO `SAVE/` databases, VASP `WAVECAR` and
+  `CHGCAR`, QE `.wfc*` files, trajectories, and temporary restart databases.
+- Use MatClaw controller storage only for chat state, scheduler state,
+  credentials, and small workspace notes.
+
+On Beefcake, `/home/brian` and `/cluster/shared` are persistent shared storage.
+Heavy jobs on the `vasp-0x` nodes should stage into `$SLURM_TMPDIR`, `$TMPDIR`,
+or `/scratch/$USER`, then copy selected outputs back. Do not place QE `outdir`,
+YAMBO `SAVE/`, VASP working directories, or large trajectories directly in NFS
+unless the user explicitly asks.
+
+See [hpc-storage-policy.md](hpc-storage-policy.md) for the SLURM copy-in /
+copy-back template and engine-specific rules.
+
 ## Skill Organization
 
 Skills are organized hierarchically: each **skill group** has a top-level `SKILL.md` with an overview, method decision guide, and sub-skill table. Each **sub-skill** has its own `SKILL.md` with complete, self-contained computation workflows.

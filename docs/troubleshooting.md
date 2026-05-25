@@ -8,6 +8,7 @@ Common issues and solutions for MatClaw installation, container builds, and runt
 - [Container Runtime Issues](#container-runtime-issues)
 - [Channel Connection Issues](#channel-connection-issues)
 - [Agent Computation Issues](#agent-computation-issues)
+- [HPC Storage Issues](#hpc-storage-issues)
 
 ---
 
@@ -199,6 +200,31 @@ CONTAINER_IMAGE=matclaw-agent:latest
 
 ---
 
+### Controller restart loop with SQLite disk I/O errors
+
+```
+SqliteError: disk I/O error
+code: SQLITE_IOERR_FSYNC
+```
+
+**Cause:** The filesystem holding `store/messages.db` is full or unhealthy.
+On HPC deployments this often happens when solver outputs are written into
+shared home/NFS instead of scratch.
+
+**Solution:**
+
+```bash
+df -h /home "$PWD" /cluster/shared 2>/dev/null || df -h
+du -sh /home/* /cluster/shared/* 2>/dev/null | sort -h | tail
+```
+
+Free space without deleting scientific output first: prune Docker caches,
+old logs, and old backups. Then pause stale scheduled tasks if they are
+auto-spawning new worker containers, restart MatClaw, and move future solver
+work to scratch. See `docs/hpc-storage-policy.md`.
+
+---
+
 ### Deleted session causes `resume` error
 
 ```
@@ -297,6 +323,48 @@ conda install -c conda-forge <package-name>
 ```
 
 Pre-installed packages: numpy, scipy, matplotlib, pandas, seaborn, pymatgen, ase, mace-torch, mp-api, spglib, torch, chgnet, sevenn, matgl.
+
+---
+
+## HPC Storage Issues
+
+### Shared home or NFS fills during VASP/QE/YAMBO jobs
+
+**Cause:** Plane-wave and many-body codes wrote wavefunctions, charge density,
+or restart databases into persistent shared storage. Examples include VASP
+`WAVECAR`/`CHGCAR`, QE `.wfc*`, and YAMBO `SAVE/`.
+
+**Solution:** Use persistent shared storage only for inputs and selected final
+artifacts. Run the solver in node-local or cluster scratch and copy back small
+results:
+
+```bash
+PROJECT_NFS="$HOME/projects/my-project"
+SCRATCH_BASE="${SLURM_TMPDIR:-${TMPDIR:-/scratch/$USER}}"
+WORKDIR="$SCRATCH_BASE/matclaw/${SLURM_JOB_ID:-manual}"
+mkdir -p "$WORKDIR"
+rsync -a "$PROJECT_NFS/input/" "$WORKDIR/"
+cd "$WORKDIR"
+```
+
+After the run, copy back logs, final structures, parsed tables, plots, and
+requested restart files. Do not copy large restart files back unless they are
+needed for the next step.
+
+### No scratch filesystem on the login/controller node
+
+**Cause:** Scratch often exists only on compute nodes during SLURM allocation.
+
+**Solution:** Do not test scratch assumptions only on the controller. Put the
+scratch selection logic inside the SLURM script and check it after allocation:
+
+```bash
+SCRATCH_BASE="${SLURM_TMPDIR:-${TMPDIR:-/scratch/$USER}}"
+df -h "$SCRATCH_BASE"
+```
+
+If the directory does not exist or has insufficient space, fail the SLURM job
+before starting the solver and report the issue to the user.
 
 ---
 

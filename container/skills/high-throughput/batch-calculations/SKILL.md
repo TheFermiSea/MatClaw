@@ -23,6 +23,27 @@
 - Python packages: `pymatgen`, `ase`, `numpy`, `pandas`, `matplotlib`.
 - Optional: `pip install custodian` for error-correcting job management.
 
+## Storage Policy
+
+Batch DFT jobs must not run high-write solver directories directly on NFS or
+shared home. Use NFS/shared project storage for generated inputs, metadata, and
+final summaries, but stage each actual solver run into node-local or cluster
+scratch.
+
+On Beefcake:
+
+- `/home/brian` and `/cluster/shared` are persistent shared storage. Keep
+  `job_metadata.json`, generated input sets, final CSV/JSON tables, plots, and
+  selected output files there.
+- `$SLURM_TMPDIR`, `$TMPDIR`, or `/scratch/$USER` should hold QE `outdir`,
+  QE `.wfc*`, YAMBO `SAVE/`, VASP `WAVECAR`/`CHGCAR`, and trajectories while
+  jobs run on the `vasp-0x` nodes.
+- Copy back `*.out`, `*.err`, `*.xml`, final structures, parsed tables, and
+  plots. Copy restart files back only when the user explicitly needs them.
+
+If scratch does not exist or shared storage is over 95% full, stop and report
+disk status before submitting more batch jobs.
+
 ## Detailed Steps
 
 ### Workflow A: Quantum ESPRESSO Batch Calculations
@@ -53,6 +74,7 @@ from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
 # ================================================================== #
 INPUT_DIR = "structures"          # directory with CIF/POSCAR files
 WORK_DIR = "batch_qe"            # output directory for QE calculations
+SCRATCH_ROOT = os.environ.get("MATCLAW_SCRATCH_ROOT", "")  # set in SLURM jobs
 PSEUDO_DIR = "./pseudo"           # pseudopotential directory (absolute or relative)
 CALCULATION = "vc-relax"          # "scf", "relax", "vc-relax", "bands"
 ECUTWFC = 60.0                    # Ry
@@ -95,7 +117,10 @@ def generate_qe_input(structure, calc_dir, prefix, calculation=CALCULATION):
     control = {
         "calculation": calculation,
         "prefix": prefix,
-        "outdir": "./tmp",
+        # For local toy runs this stays inside calc_dir. In SLURM jobs, set
+        # MATCLAW_SCRATCH_ROOT to a node-local scratch path and substitute this
+        # outdir before submission.
+        "outdir": os.path.join(SCRATCH_ROOT, prefix, "qe-tmp") if SCRATCH_ROOT else "./tmp",
         "pseudo_dir": os.path.abspath(PSEUDO_DIR),
         "tprnfor": True,
         "tstress": True,

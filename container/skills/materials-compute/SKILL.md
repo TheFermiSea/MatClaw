@@ -7,6 +7,44 @@ description: "Materials computation environment reference and skill index. READ 
 
 This container includes a full materials science computation environment. Use these tools for atomistic simulation tasks.
 
+## HPC Storage Policy
+
+Before running any DFT, many-body, MD, or Monte Carlo workflow on the
+`vasp-0x` cluster, split storage by role:
+
+- Persistent NFS/shared storage is for source inputs, scripts, small logs,
+  final summaries, selected final outputs, and user-visible reports.
+- Node-local or cluster scratch is for write-heavy solver working directories:
+  QE `.wfc*` files, QE `outdir`, YAMBO `SAVE/`, VASP `WAVECAR`/`CHGCAR`,
+  LAMMPS/RASPA trajectories, and temporary restart databases.
+- MatClaw controller storage is only for chat state, scheduler state,
+  credentials, and small workspace notes. Never write solver output there.
+
+On Beefcake, treat `/home/brian` and `/cluster/shared` as persistent shared
+storage. Do not point QE `outdir`, YAMBO `SAVE/`, VASP working directories, or
+large trajectories directly at those paths unless the user explicitly asks.
+
+For SLURM jobs, generate scripts that:
+
+1. Create a per-job scratch directory under `$SLURM_TMPDIR`, `$TMPDIR`, or
+   `/scratch/$USER`.
+2. Copy required inputs from the NFS project directory into scratch.
+3. Run the solver from scratch through `srun`, `mpirun`, or the cluster module.
+4. Copy final logs, structures, parsed tables, plots, and requested restart
+   files back to the NFS project directory.
+5. Check free space before submission and stop if scratch or NFS is critically
+   low.
+
+Never delete `WAVECAR`, `CHGCAR`, QE `.wfc*`, YAMBO `SAVE/`, or other large
+scientific outputs unless the user explicitly confirms.
+
+For Beefcake production calculations, prefer the solver installations already
+available on the `vasp-0x` compute nodes through SLURM. The MatClaw container
+is the controller and analysis environment; it should generate inputs, submit
+jobs, monitor status, parse returned outputs, and run lightweight analysis.
+It should not compile or run heavyweight DFT/MPI workloads locally when the
+cluster provides those engines.
+
 ## Available Computation Engines
 
 ### Quantum ESPRESSO 7.5 (DFT)
