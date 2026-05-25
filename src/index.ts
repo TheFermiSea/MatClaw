@@ -89,6 +89,12 @@ const channels: Channel[] = [];
 const queue = new GroupQueue();
 const WEB_CHAT_FOLDER = 'web_chat';
 const WEB_CHAT_JID = 'web:chat';
+const AGENT_PROGRESS_MIN_INTERVAL_MS = 30_000;
+const AGENT_PROGRESS_HEARTBEAT_MS = 60_000;
+
+function formatAgentProgress(text: string): string {
+  return text.replace(/\s+/g, ' ').trim().slice(0, 700);
+}
 
 function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
@@ -590,11 +596,50 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   await channel.setTyping?.(chatJid, true);
   let hadError = false;
   let outputSentToUser = false;
+  let lastProgressSentAt = 0;
+  let lastProgressText = '';
+
+  const sendProgress = async (text: string, force = false) => {
+    const progress = formatAgentProgress(text);
+    if (!progress || progress === lastProgressText) return;
+    const now = Date.now();
+    if (!force && now - lastProgressSentAt < AGENT_PROGRESS_MIN_INTERVAL_MS) {
+      return;
+    }
+    lastProgressSentAt = now;
+    lastProgressText = progress;
+    await channel.sendMessage(chatJid, progress);
+  };
+
+  try {
+    await sendProgress(
+      'Working on this now. I will send updates while it runs.',
+      true,
+    );
+  } catch (err) {
+    logger.warn({ chatJid, err }, 'Failed to send initial agent progress');
+  }
+
+  const heartbeatTimer = setInterval(() => {
+    void sendProgress('Still working; no final answer yet.', false).catch(
+      (err) =>
+        logger.warn(
+          { chatJid, err },
+          'Failed to send agent progress heartbeat',
+        ),
+    );
+  }, AGENT_PROGRESS_HEARTBEAT_MS);
 
   let output: 'success' | 'error';
   try {
     output = await runAgent(group, prompt, chatJid, async (result) => {
       // Streaming output callback — called for each agent result
+      if (result.kind === 'progress' && result.progress) {
+        await sendProgress(result.progress);
+        resetIdleTimer();
+        return;
+      }
+
       if (result.result) {
         const raw =
           typeof result.result === 'string'
@@ -630,6 +675,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       'Agent failed before returning output',
     );
   } finally {
+    clearInterval(heartbeatTimer);
     await channel.setTyping?.(chatJid, false);
     if (idleTimer) clearTimeout(idleTimer);
   }

@@ -49,6 +49,9 @@ export interface ContainerInput {
 export interface ContainerOutput {
   status: 'success' | 'error';
   result: string | null;
+  kind?: 'result' | 'session' | 'progress';
+  progress?: string;
+  progressType?: 'assistant' | 'tool' | 'heartbeat';
   newSessionId?: string;
   error?: string;
 }
@@ -527,7 +530,9 @@ export async function runContainerAgent(
             if (parsed.newSessionId) {
               newSessionId = parsed.newSessionId;
             }
-            hadStreamingOutput = true;
+            if (parsed.result) {
+              hadFinalStreamingOutput = true;
+            }
             // Activity detected — reset the hard timeout
             resetTimeout();
             // Emit dashboard event: parsed agent output
@@ -588,7 +593,7 @@ export async function runContainerAgent(
     });
 
     let timedOut = false;
-    let hadStreamingOutput = false;
+    let hadFinalStreamingOutput = false;
     const configTimeout = group.containerConfig?.timeout || CONTAINER_TIMEOUT;
     // Grace period: hard timeout must be at least IDLE_TIMEOUT + 30s so the
     // graceful _close sentinel has time to trigger before the hard kill fires.
@@ -681,14 +686,14 @@ export async function runContainerAgent(
             `Container: ${containerName}`,
             `Duration: ${duration}ms`,
             `Exit Code: ${code}`,
-            `Had Streaming Output: ${hadStreamingOutput}`,
+            `Had Final Streaming Output: ${hadFinalStreamingOutput}`,
           ].join('\n'),
         );
 
         // Timeout after output = idle cleanup, not failure.
         // The agent already sent its response; this is just the
         // container being reaped after the idle period expired.
-        if (hadStreamingOutput) {
+        if (hadFinalStreamingOutput) {
           logger.info(
             { group: group.name, containerName, duration, code },
             'Container timed out after output (idle cleanup)',
@@ -778,10 +783,10 @@ export async function runContainerAgent(
         // 137 = SIGKILL (docker kill), 143 = SIGTERM — expected when /stop or /new is used
         // 137 = SIGKILL (docker kill), 143 = SIGTERM — expected when /stop or /new is used
         const isSignalKill = code === 137 || code === 143;
-        if (isSignalKill && hadStreamingOutput) {
+        if (isSignalKill && hadFinalStreamingOutput) {
           logger.info(
             { group: group.name, code, duration },
-            'Container killed after output was already captured — not an error',
+            'Container killed after final output was already captured — not an error',
           );
           // Fall through to success handling below
         } else {

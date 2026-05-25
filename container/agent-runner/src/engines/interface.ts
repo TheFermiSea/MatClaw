@@ -6,6 +6,9 @@
 export interface ContainerOutput {
   status: 'success' | 'error';
   result: string | null;
+  kind?: 'result' | 'session' | 'progress';
+  progress?: string;
+  progressType?: 'assistant' | 'tool' | 'heartbeat';
   newSessionId?: string;
   error?: string;
 }

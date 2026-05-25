@@ -5,7 +5,12 @@
 
 import fs from 'fs';
 import path from 'path';
-import { query, HookCallback, PreCompactHookInput, PreToolUseHookInput } from '@anthropic-ai/claude-agent-sdk';
+import {
+  query,
+  HookCallback,
+  PreCompactHookInput,
+  PreToolUseHookInput,
+} from '@anthropic-ai/claude-agent-sdk';
 import { AgentEngine, EngineContext, QueryResult } from './interface.js';
 
 // ── SDK message type for MessageStream ──
@@ -45,7 +50,9 @@ class MessageStream {
         yield this.queue.shift()!;
       }
       if (this.done) return;
-      await new Promise<void>(r => { this.waiting = r; });
+      await new Promise<void>((r) => {
+        this.waiting = r;
+      });
       this.waiting = null;
     }
   }
@@ -69,20 +76,31 @@ interface ParsedMessage {
   content: string;
 }
 
-function getSessionSummary(sessionId: string, transcriptPath: string): string | null {
+function getSessionSummary(
+  sessionId: string,
+  transcriptPath: string,
+): string | null {
   const projectDir = path.dirname(transcriptPath);
   const indexPath = path.join(projectDir, 'sessions-index.json');
   if (!fs.existsSync(indexPath)) return null;
   try {
-    const index: SessionsIndex = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
-    return index.entries.find(e => e.sessionId === sessionId)?.summary ?? null;
+    const index: SessionsIndex = JSON.parse(
+      fs.readFileSync(indexPath, 'utf-8'),
+    );
+    return (
+      index.entries.find((e) => e.sessionId === sessionId)?.summary ?? null
+    );
   } catch {
     return null;
   }
 }
 
 function sanitizeFilename(summary: string): string {
-  return summary.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 50);
+  return summary
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 50);
 }
 
 function generateFallbackName(): string {
@@ -97,31 +115,55 @@ function parseTranscript(content: string): ParsedMessage[] {
     try {
       const entry = JSON.parse(line);
       if (entry.type === 'user' && entry.message?.content) {
-        const text = typeof entry.message.content === 'string'
-          ? entry.message.content
-          : entry.message.content.map((c: { text?: string }) => c.text || '').join('');
+        const text =
+          typeof entry.message.content === 'string'
+            ? entry.message.content
+            : entry.message.content
+                .map((c: { text?: string }) => c.text || '')
+                .join('');
         if (text) messages.push({ role: 'user', content: text });
       } else if (entry.type === 'assistant' && entry.message?.content) {
         const textParts = entry.message.content
           .filter((c: { type: string }) => c.type === 'text')
           .map((c: { text: string }) => c.text);
-        if (textParts.join('')) messages.push({ role: 'assistant', content: textParts.join('') });
+        if (textParts.join(''))
+          messages.push({ role: 'assistant', content: textParts.join('') });
       }
-    } catch { /* skip malformed lines */ }
+    } catch {
+      /* skip malformed lines */
+    }
   }
   return messages;
 }
 
-function formatTranscriptMarkdown(messages: ParsedMessage[], title?: string | null, assistantName?: string): string {
+function formatTranscriptMarkdown(
+  messages: ParsedMessage[],
+  title?: string | null,
+  assistantName?: string,
+): string {
   const now = new Date();
-  const fmt = (d: Date) => d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
+  const fmt = (d: Date) =>
+    d.toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    });
   const lines: string[] = [
-    `# ${title || 'Conversation'}`, '',
-    `Archived: ${fmt(now)}`, '', '---', '',
+    `# ${title || 'Conversation'}`,
+    '',
+    `Archived: ${fmt(now)}`,
+    '',
+    '---',
+    '',
   ];
   for (const msg of messages) {
-    const sender = msg.role === 'user' ? 'User' : (assistantName || 'Assistant');
-    const content = msg.content.length > 2000 ? msg.content.slice(0, 2000) + '...' : msg.content;
+    const sender = msg.role === 'user' ? 'User' : assistantName || 'Assistant';
+    const content =
+      msg.content.length > 2000
+        ? msg.content.slice(0, 2000) + '...'
+        : msg.content;
     lines.push(`**${sender}**: ${content}`, '');
   }
   return lines.join('\n');
@@ -155,7 +197,9 @@ function createPreCompactHook(assistantName?: string): HookCallback {
         path.join(conversationsDir, `${date}-${name}.md`),
         formatTranscriptMarkdown(messages, summary, assistantName),
       );
-    } catch { /* non-fatal */ }
+    } catch {
+      /* non-fatal */
+    }
     return {};
   };
 }
@@ -197,12 +241,14 @@ function createSanitizeBashHook(): HookCallback {
 function findLongSleep(command: string, maxSeconds: number): number | null {
   if (!Number.isFinite(maxSeconds) || maxSeconds <= 0) return null;
 
-  const sleepPattern = /(?:^|[\s;&|()])sleep\s+([0-9]+)([smhd]?)(?=$|[\s;&|()'"])/gi;
+  const sleepPattern =
+    /(?:^|[\s;&|()])sleep\s+([0-9]+)([smhd]?)(?=$|[\s;&|()'"])/gi;
   let match: RegExpExecArray | null;
   while ((match = sleepPattern.exec(command)) !== null) {
     const value = parseInt(match[1], 10);
     const unit = match[2].toLowerCase();
-    const multiplier = unit === 'd' ? 86400 : unit === 'h' ? 3600 : unit === 'm' ? 60 : 1;
+    const multiplier =
+      unit === 'd' ? 86400 : unit === 'h' ? 3600 : unit === 'm' ? 60 : 1;
     const seconds = value * multiplier;
     if (seconds > maxSeconds) return seconds;
   }
@@ -213,6 +259,45 @@ function findLongSleep(command: string, maxSeconds: number): number | null {
 // ── Claude Engine ──
 
 const IPC_POLL_MS = 500;
+const PROGRESS_MAX_CHARS = 500;
+
+function compactProgressText(text: string): string {
+  return text
+    .replace(/<internal>[\s\S]*?<\/internal>/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, PROGRESS_MAX_CHARS);
+}
+
+function summarizeToolInput(name: string | undefined, input: unknown): string {
+  if (!input || typeof input !== 'object') return name || 'tool';
+  const obj = input as Record<string, unknown>;
+  const description = obj['description'];
+  if (typeof description === 'string' && description.trim()) {
+    return description.trim();
+  }
+  const command = obj['command'];
+  if (typeof command === 'string' && command.trim()) {
+    return command.trim().split('\n')[0].slice(0, 220);
+  }
+  return name || 'tool';
+}
+
+function emitProgress(
+  ctx: EngineContext,
+  progressType: 'assistant' | 'tool',
+  text: string,
+): void {
+  const progress = compactProgressText(text);
+  if (!progress) return;
+  ctx.writeOutput({
+    status: 'success',
+    result: null,
+    kind: 'progress',
+    progressType,
+    progress,
+  });
+}
 
 export class ClaudeEngine implements AgentEngine {
   readonly name = 'claude';
@@ -269,7 +354,8 @@ export class ClaudeEngine implements AgentEngine {
         if (fs.statSync(fullPath).isDirectory()) extraDirs.push(fullPath);
       }
     }
-    if (extraDirs.length > 0) ctx.log(`Additional directories: ${extraDirs.join(', ')}`);
+    if (extraDirs.length > 0)
+      ctx.log(`Additional directories: ${extraDirs.join(', ')}`);
 
     // Set model if AGENT_MODEL is configured (maps to CLAUDE_CODE_MODEL for SDK).
     // Read from sdkEnv first (refreshed via IPC) so model can switch mid-session,
@@ -290,16 +376,33 @@ export class ClaudeEngine implements AgentEngine {
         resume: sessionId,
         resumeSessionAt: resumeAt,
         systemPrompt: globalClaudeMd
-          ? { type: 'preset' as const, preset: 'claude_code' as const, append: globalClaudeMd }
+          ? {
+              type: 'preset' as const,
+              preset: 'claude_code' as const,
+              append: globalClaudeMd,
+            }
           : undefined,
         allowedTools: [
-          'Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep',
-          'WebSearch', 'WebFetch',
-          'Task', 'TaskOutput', 'TaskStop',
-          'TeamCreate', 'TeamDelete', 'SendMessage',
-          'TodoWrite', 'ToolSearch', 'Skill',
+          'Bash',
+          'Read',
+          'Write',
+          'Edit',
+          'Glob',
+          'Grep',
+          'WebSearch',
+          'WebFetch',
+          'Task',
+          'TaskOutput',
+          'TaskStop',
+          'TeamCreate',
+          'TeamDelete',
+          'SendMessage',
+          'TodoWrite',
+          'ToolSearch',
+          'Skill',
           'NotebookEdit',
-          'mcp__matclaw__*', 'mcp__gmail__*',
+          'mcp__matclaw__*',
+          'mcp__gmail__*',
         ],
         env: ctx.sdkEnv,
         permissionMode: 'bypassPermissions',
@@ -324,34 +427,72 @@ export class ClaudeEngine implements AgentEngine {
           PreCompact: [{ hooks: [createPreCompactHook(ctx.assistantName)] }],
           PreToolUse: [{ matcher: 'Bash', hooks: [createSanitizeBashHook()] }],
         },
-      }
+      },
     })) {
       messageCount++;
-      const msgType = message.type === 'system' ? `system/${(message as { subtype?: string }).subtype}` : message.type;
+      const msgType =
+        message.type === 'system'
+          ? `system/${(message as { subtype?: string }).subtype}`
+          : message.type;
       ctx.log(`[msg #${messageCount}] type=${msgType}`);
 
       if (message.type === 'assistant') {
-        if ('uuid' in message) lastAssistantUuid = (message as { uuid: string }).uuid;
-        const msg = message as { message?: { content?: Array<{ type: string; text?: string; thinking?: string; name?: string; input?: unknown; id?: string }> } };
+        if ('uuid' in message)
+          lastAssistantUuid = (message as { uuid: string }).uuid;
+        const msg = message as {
+          message?: {
+            content?: Array<{
+              type: string;
+              text?: string;
+              thinking?: string;
+              name?: string;
+              input?: unknown;
+              id?: string;
+            }>;
+          };
+        };
         if (msg.message?.content) {
           for (const block of msg.message.content) {
-            if (block.type === 'thinking' && block.thinking) ctx.log(`[Thinking] ${block.thinking.slice(0, 2000)}`);
-            else if (block.type === 'text' && block.text) ctx.log(`[Assistant] ${block.text.slice(0, 2000)}`);
-            else if (block.type === 'tool_use') {
+            if (block.type === 'thinking' && block.thinking)
+              ctx.log(`[Thinking] ${block.thinking.slice(0, 2000)}`);
+            else if (block.type === 'text' && block.text) {
+              ctx.log(`[Assistant] ${block.text.slice(0, 2000)}`);
+              emitProgress(ctx, 'assistant', block.text);
+            } else if (block.type === 'tool_use') {
               ctx.log(`[ToolCall] ${block.name} (id: ${block.id})`);
-              ctx.log(`[ToolInput] ${JSON.stringify(block.input || {}).slice(0, 3000)}`);
+              ctx.log(
+                `[ToolInput] ${JSON.stringify(block.input || {}).slice(0, 3000)}`,
+              );
+              emitProgress(
+                ctx,
+                'tool',
+                `Using ${block.name || 'tool'}: ${summarizeToolInput(block.name, block.input)}`,
+              );
             }
           }
         }
       }
 
       if (message.type === 'user') {
-        const msg = message as { message?: { content?: Array<{ type: string; tool_use_id?: string; content?: unknown }> } };
+        const msg = message as {
+          message?: {
+            content?: Array<{
+              type: string;
+              tool_use_id?: string;
+              content?: unknown;
+            }>;
+          };
+        };
         if (msg.message?.content) {
           for (const block of msg.message.content) {
             if (block.type === 'tool_result') {
-              const resultStr = typeof block.content === 'string' ? block.content : JSON.stringify(block.content || '');
-              ctx.log(`[ToolResult] (id: ${block.tool_use_id}) ${resultStr.slice(0, 3000)}`);
+              const resultStr =
+                typeof block.content === 'string'
+                  ? block.content
+                  : JSON.stringify(block.content || '');
+              ctx.log(
+                `[ToolResult] (id: ${block.tool_use_id}) ${resultStr.slice(0, 3000)}`,
+              );
             }
           }
         }
@@ -362,21 +503,39 @@ export class ClaudeEngine implements AgentEngine {
         ctx.log(`Session initialized: ${newSessionId}`);
       }
 
-      if (message.type === 'system' && (message as { subtype?: string }).subtype === 'task_notification') {
-        const tn = message as { task_id: string; status: string; summary: string };
-        ctx.log(`Task notification: task=${tn.task_id} status=${tn.status} summary=${tn.summary}`);
+      if (
+        message.type === 'system' &&
+        (message as { subtype?: string }).subtype === 'task_notification'
+      ) {
+        const tn = message as {
+          task_id: string;
+          status: string;
+          summary: string;
+        };
+        ctx.log(
+          `Task notification: task=${tn.task_id} status=${tn.status} summary=${tn.summary}`,
+        );
       }
 
       if (message.type === 'result') {
         resultCount++;
-        const textResult = 'result' in message ? (message as { result?: string }).result : null;
-        ctx.log(`[Result #${resultCount}] subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 500)}` : ''}`);
-        ctx.writeOutput({ status: 'success', result: textResult || null, newSessionId });
+        const textResult =
+          'result' in message ? (message as { result?: string }).result : null;
+        ctx.log(
+          `[Result #${resultCount}] subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 500)}` : ''}`,
+        );
+        ctx.writeOutput({
+          status: 'success',
+          result: textResult || null,
+          newSessionId,
+        });
       }
     }
 
     ipcPolling = false;
-    ctx.log(`Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`);
+    ctx.log(
+      `Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`,
+    );
     return { newSessionId, lastAssistantUuid, closedDuringQuery };
   }
 }

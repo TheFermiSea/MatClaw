@@ -38,6 +38,9 @@ interface ContainerInput {
 interface ContainerOutput {
   status: 'success' | 'error';
   result: string | null;
+  kind?: 'result' | 'session' | 'progress';
+  progress?: string;
+  progressType?: 'assistant' | 'tool' | 'heartbeat';
   newSessionId?: string;
   error?: string;
 }
@@ -394,7 +397,12 @@ async function main(): Promise<void> {
       }
 
       // Emit session update so host can track it
-      writeOutput({ status: 'success', result: null, newSessionId: sessionId });
+      writeOutput({
+        status: 'success',
+        result: null,
+        kind: 'session',
+        newSessionId: sessionId,
+      });
 
       log('Query ended, waiting for next IPC message...');
 
