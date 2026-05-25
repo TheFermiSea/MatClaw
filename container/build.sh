@@ -3,6 +3,7 @@
 #
 # Usage:
 #   ./build.sh              # Build CPU image (matclaw-agent:latest)
+#   ./build.sh --controller # Build lightweight controller image (no local solvers)
 #   ./build.sh --cuda       # Build CUDA/GPU image (matclaw-agent:cuda)
 #   ./build.sh --smoke-test # Build CPU image and run smoke test
 #   ./build.sh v1.0         # Build CPU image with custom tag
@@ -17,6 +18,7 @@ IMAGE_NAME="matclaw-agent"
 CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-docker}"
 TAG=""
 CUDA=false
+CONTROLLER=false
 SMOKE_TEST=false
 
 # Parse arguments
@@ -24,6 +26,9 @@ for arg in "$@"; do
   case "$arg" in
     --cuda)
       CUDA=true
+      ;;
+    --controller)
+      CONTROLLER=true
       ;;
     --smoke-test)
       SMOKE_TEST=true
@@ -35,8 +40,19 @@ for arg in "$@"; do
 done
 
 BUILD_ARGS=""
+DOCKERFILE="Dockerfile"
 
-if [ "$CUDA" = true ]; then
+if [ "$CONTROLLER" = true ] && [ "$CUDA" = true ]; then
+  echo "ERROR: --controller and --cuda are mutually exclusive" >&2
+  exit 1
+fi
+
+if [ "$CONTROLLER" = true ]; then
+  TAG="${TAG:-controller}"
+  DOCKERFILE="Dockerfile.controller"
+  echo "Building MatClaw controller image (no local QE/LAMMPS/RASPA solvers)..."
+  echo "  Heavy computation: delegated to SLURM/vasp-0x via cluster tools"
+elif [ "$CUDA" = true ]; then
   TAG="${TAG:-cuda}"
   # Runtime stage: CUDA runtime image + GPU PyTorch
   BUILD_ARGS="--build-arg BASE_IMAGE=nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04"
@@ -62,7 +78,7 @@ if [ -n "$BUILD_NETWORK" ]; then
   NETWORK_ARG="--network=${BUILD_NETWORK}"
 fi
 
-${CONTAINER_RUNTIME} build ${NETWORK_ARG} ${BUILD_ARGS} -t "${IMAGE_NAME}:${TAG}" .
+${CONTAINER_RUNTIME} build ${NETWORK_ARG} ${BUILD_ARGS} -f "${DOCKERFILE}" -t "${IMAGE_NAME}:${TAG}" .
 
 echo ""
 echo "Build complete!"

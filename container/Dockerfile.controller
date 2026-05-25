@@ -1,0 +1,104 @@
+# MatClaw controller/agent container
+#
+# This image is for the beefcake cluster deployment where computationally heavy
+# solvers run through SLURM on the vasp-0x nodes. Do not compile or package QE,
+# LAMMPS, RASPA, VASP, etc. in this image; the agent should submit/inspect jobs
+# via cluster tools such as vasp-remote.
+
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV NVIDIA_VISIBLE_DEVICES=void
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
+
+# Install Node.js 22 from NodeSource plus browser/runtime dependencies.
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl gnupg && \
+    mkdir -p /etc/apt/keyrings && \
+    curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg && \
+    echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" > /etc/apt/sources.list.d/nodesource.list && \
+    apt-get update && apt-get install -y --no-install-recommends \
+      nodejs \
+      chromium-browser \
+      fonts-liberation \
+      fonts-noto-cjk \
+      fonts-noto-color-emoji \
+      libgbm1 \
+      libnss3 \
+      libatk-bridge2.0-0t64 \
+      libgtk-3-0t64 \
+      libx11-xcb1 \
+      libxcomposite1 \
+      libxdamage1 \
+      libxrandr2 \
+      libasound2t64 \
+      libpangocairo-1.0-0 \
+      libcups2t64 \
+      libdrm2 \
+      libxshmfence1 \
+      curl \
+      git \
+      wget \
+      build-essential \
+      openssh-client \
+      python3 \
+      python3-pip \
+      python-is-python3 \
+      sudo \
+      && rm -rf /var/lib/apt/lists/*
+
+# Install Miniconda for Python tooling without using Ubuntu's externally
+# managed system Python. Keep this to controller/lightweight analysis packages.
+RUN dpkgArch="$(dpkg --print-architecture)" && \
+    if [ "$dpkgArch" = "amd64" ]; then \
+      CONDA_URL="https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh"; \
+    else \
+      CONDA_URL="https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-aarch64.sh"; \
+    fi && \
+    wget -q "$CONDA_URL" -O /tmp/miniconda.sh && \
+    bash /tmp/miniconda.sh -b -p /opt/conda && \
+    rm /tmp/miniconda.sh
+
+ENV HOME=/home/node
+ENV PATH="/home/node/.local/bin:/opt/conda/bin:$PATH"
+
+# Lightweight Python/materials helpers and NotebookLM CLI/MCP. Solver execution
+# is delegated to SLURM, so do not add heavyweight simulation packages here.
+RUN pip install --no-cache-dir \
+      numpy scipy matplotlib pandas seaborn \
+      pymatgen ase mp-api spglib \
+      notebooklm-mcp-cli==0.6.10
+
+ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium-browser
+
+# Install vasp-remote script (VASP execution via SSH/SLURM, not local VASP).
+COPY scripts/vasp-remote /usr/local/bin/vasp-remote
+RUN chmod +x /usr/local/bin/vasp-remote
+
+# Install agent CLIs globally.
+RUN npm install -g agent-browser @anthropic-ai/claude-code @openai/codex
+
+WORKDIR /app
+COPY agent-runner/package*.json ./
+RUN npm install
+COPY agent-runner/ ./
+RUN npm run build
+
+RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input
+
+# Secrets are passed via stdin JSON; follow-up messages arrive via IPC files.
+# For Codex engine: symlink skills from .claude/skills/ to .codex/skills/.
+RUN printf '#!/bin/bash\nset -e\ncd /app && npx tsc --outDir /tmp/dist 2>&1 >&2\nln -s /app/node_modules /tmp/dist/node_modules\nchmod -R a-w /tmp/dist\nif [ "$AGENT_ENGINE" = "codex" ] && [ -d /home/node/.claude/skills ]; then\n  mkdir -p /home/node/.codex/skills\n  for skill in /home/node/.claude/skills/*/; do\n    [ -d "$skill" ] && ln -sf "$skill" /home/node/.codex/skills/ 2>/dev/null || true\n  done\nfi\ncat > /tmp/input.json\nnode /tmp/dist/index.js < /tmp/input.json\n' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
+
+RUN userdel -r ubuntu 2>/dev/null || true && \
+    groupadd --gid 1000 node && \
+    useradd --uid 1000 --gid node --shell /bin/bash --create-home node && \
+    echo "node ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
+COPY skills/ /home/node/.claude/skills/
+RUN chown -R node:node /workspace /home/node/.claude && chmod 777 /home/node
+
+USER node
+WORKDIR /workspace/group
+
+ENTRYPOINT ["/app/entrypoint.sh"]

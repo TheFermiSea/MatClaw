@@ -211,6 +211,13 @@ RUN pip install --no-cache-dir \
     e3nn \
     chgnet sevenn matgl
 
+# Install NotebookLM CLI/MCP into the base image so agents do not need to
+# install it at task runtime. Keep /home/node/.local/bin on PATH as well for
+# user-installed CLI tools and uv tool shims.
+RUN pip install --no-cache-dir notebooklm-mcp-cli==0.6.10
+ENV HOME=/home/node
+ENV PATH="/home/node/.local/bin:$PATH"
+
 # MPI environment (allow running as root in container)
 ENV OMPI_ALLOW_RUN_AS_ROOT=1
 ENV OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1

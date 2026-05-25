@@ -353,6 +353,18 @@ function buildContainerArgs(
   containerName: string,
 ): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
+  const containerPath = [
+    '/home/node/.local/bin',
+    '/opt/conda/bin',
+    '/opt/lammps/bin',
+    '/opt/qe/bin',
+    '/usr/local/sbin',
+    '/usr/local/bin',
+    '/usr/sbin',
+    '/usr/bin',
+    '/sbin',
+    '/bin',
+  ].join(':');
 
   // Pass GPU access to container if configured
   if (CONTAINER_GPU) {
@@ -361,6 +373,13 @@ function buildContainerArgs(
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
+
+  // Keep CLI auth/cache resolution stable across all launch modes. Tools such
+  // as NotebookLM store auth under /home/node and may install shims in
+  // /home/node/.local/bin; make both paths explicit instead of relying on the
+  // image default or the launching host user's environment.
+  args.push('-e', 'HOME=/home/node');
+  args.push('-e', `PATH=${containerPath}`);
 
   // Pass agent engine and model selection to container.
   // Read fresh from .env each time so users can switch without restarting.
@@ -379,7 +398,6 @@ function buildContainerArgs(
   const hostGid = process.getgid?.();
   if (hostUid != null && hostUid !== 0 && hostUid !== 1000) {
     args.push('--user', `${hostUid}:${hostGid}`);
-    args.push('-e', 'HOME=/home/node');
   }
 
   for (const mount of mounts) {
