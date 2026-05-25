@@ -25,7 +25,7 @@ describe('registered groups DB query', () => {
     db.exec(`CREATE TABLE IF NOT EXISTS registered_groups (
       jid TEXT PRIMARY KEY,
       name TEXT NOT NULL,
-      folder TEXT NOT NULL UNIQUE,
+      folder TEXT NOT NULL,
       trigger_pattern TEXT NOT NULL,
       added_at TEXT NOT NULL,
       container_config TEXT,
@@ -118,4 +118,3 @@ describe('channel auth detection', () => {
     expect(hasAuth('/tmp/nonexistent_auth_dir_xyz')).toBe(false);
   });
 });
-

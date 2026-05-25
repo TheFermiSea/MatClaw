@@ -410,6 +410,27 @@ describe('registered group isMain', () => {
     expect(group.folder).toBe('whatsapp_main');
   });
 
+  it('allows multiple channel JIDs to share one group folder', () => {
+    setRegisteredGroup('web:chat', {
+      name: 'NbOCl2 Web',
+      folder: 'nbo_cl2',
+      trigger: '@Andy',
+      added_at: '2024-01-01T00:00:00.000Z',
+      isMain: true,
+    });
+    setRegisteredGroup('15125903712@s.whatsapp.net', {
+      name: 'NbOCl2 WhatsApp',
+      folder: 'nbo_cl2',
+      trigger: '@Andy',
+      added_at: '2024-01-01T00:00:01.000Z',
+      isMain: true,
+    });
+
+    const groups = getAllRegisteredGroups();
+    expect(groups['web:chat'].folder).toBe('nbo_cl2');
+    expect(groups['15125903712@s.whatsapp.net'].folder).toBe('nbo_cl2');
+  });
+
   it('omits isMain for non-main groups', () => {
     setRegisteredGroup('group@g.us', {
       name: 'Family Chat',

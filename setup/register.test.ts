@@ -14,7 +14,7 @@ function createTestDb(): Database.Database {
   db.exec(`CREATE TABLE IF NOT EXISTS registered_groups (
     jid TEXT PRIMARY KEY,
     name TEXT NOT NULL,
-    folder TEXT NOT NULL UNIQUE,
+    folder TEXT NOT NULL,
     trigger_pattern TEXT NOT NULL,
     added_at TEXT NOT NULL,
     container_config TEXT,
@@ -172,6 +172,34 @@ describe('parameterized SQL registration', () => {
       .get('123@g.us') as { is_main: number };
 
     expect(row.is_main).toBe(0);
+  });
+
+  it('allows multiple registered JIDs to share a folder', () => {
+    const stmt = db.prepare(
+      `INSERT INTO registered_groups
+       (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger)
+       VALUES (?, ?, ?, ?, ?, NULL, ?)`,
+    );
+
+    stmt.run(
+      'web:chat',
+      'NbOCl2 Web',
+      'nbo_cl2',
+      '@Andy',
+      '2024-01-01T00:00:00.000Z',
+      0,
+    );
+    stmt.run(
+      '15125903712@s.whatsapp.net',
+      'NbOCl2 WhatsApp',
+      'nbo_cl2',
+      '@Andy',
+      '2024-01-01T00:00:01.000Z',
+      0,
+    );
+
+    const rows = db.prepare('SELECT * FROM registered_groups').all();
+    expect(rows).toHaveLength(2);
   });
 
   it('upserts on conflict', () => {

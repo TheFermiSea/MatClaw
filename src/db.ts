@@ -97,7 +97,7 @@ function createSchema(database: Database.Database): void {
     CREATE TABLE IF NOT EXISTS registered_groups (
       jid TEXT PRIMARY KEY,
       name TEXT NOT NULL,
-      folder TEXT NOT NULL UNIQUE,
+      folder TEXT NOT NULL,
       trigger_pattern TEXT NOT NULL,
       added_at TEXT NOT NULL,
       container_config TEXT,
@@ -145,6 +145,52 @@ function createSchema(database: Database.Database): void {
     );
   } catch {
     /* column already exists */
+  }
+
+  // Remove legacy unique folder constraint so multiple channels can share one session folder.
+  try {
+    const row = database
+      .prepare(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'registered_groups'",
+      )
+      .get() as { sql: string } | undefined;
+
+    if (row?.sql && /\bfolder\s+TEXT\s+NOT NULL\s+UNIQUE\b/i.test(row.sql)) {
+      database.exec('PRAGMA foreign_keys=off');
+      const migrateRegisteredGroups = database.transaction(() => {
+        database.exec('DROP TABLE IF EXISTS registered_groups_new');
+        database.exec(`CREATE TABLE registered_groups_new (
+          jid TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          folder TEXT NOT NULL,
+          trigger_pattern TEXT NOT NULL,
+          added_at TEXT NOT NULL,
+          container_config TEXT,
+          requires_trigger INTEGER DEFAULT 1,
+          is_main INTEGER DEFAULT 0
+        )`);
+        database.exec(`INSERT INTO registered_groups_new
+          (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main)
+          SELECT jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main
+          FROM registered_groups`);
+        database.exec('DROP TABLE registered_groups');
+        database.exec(
+          'ALTER TABLE registered_groups_new RENAME TO registered_groups',
+        );
+      });
+      migrateRegisteredGroups();
+      database.exec('PRAGMA foreign_keys=on');
+    }
+  } catch (err) {
+    try {
+      database.exec('PRAGMA foreign_keys=on');
+    } catch {
+      /* ignore pragma reset failure */
+    }
+    logger.warn(
+      { err },
+      'Could not migrate registered_groups folder uniqueness',
+    );
   }
 
   // Add channel and is_group columns if they don't exist (migration for existing DBs)
