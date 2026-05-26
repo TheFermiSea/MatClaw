@@ -35,7 +35,7 @@ function summarizeItem(item: ThreadItem): string {
     case 'command_execution':
       return item.command.slice(0, 200);
     case 'file_change':
-      return item.changes.map(c => c.path).join(', ');
+      return item.changes.map((c: { path: string }) => c.path).join(', ');
     case 'mcp_tool_call':
       return `${item.server}.${item.tool}`;
     default:
@@ -182,14 +182,14 @@ export class CodexEngine implements AgentEngine {
             switch (e.item.type) {
               case 'agent_message':
                 resultText = e.item.text;
-                ctx.log(`[Agent] ${resultText.slice(0, 500)}`);
+                ctx.log(`[Agent] ${e.item.text.slice(0, 500)}`);
                 break;
               case 'command_execution':
                 ctx.log(`[Command] ${e.item.command} → exit ${e.item.exit_code ?? '?'}`);
                 if (e.item.aggregated_output) ctx.log(`[Output] ${e.item.aggregated_output.slice(0, 1000)}`);
                 break;
               case 'file_change':
-                ctx.log(`[FileChange] ${e.item.changes.map(c => c.path).join(', ')}`);
+                ctx.log(`[FileChange] ${e.item.changes.map((c: { path: string }) => c.path).join(', ')}`);
                 break;
               case 'mcp_tool_call':
                 ctx.log(`[MCP] ${e.item.server}.${e.item.tool}`);
