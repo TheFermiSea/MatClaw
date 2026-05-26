@@ -179,7 +179,7 @@ const SECRET_ENV_VARS = [
 ];
 
 function createPreCompactHook(assistantName?: string): HookCallback {
-  return async (input) => {
+  return async (input: unknown) => {
     const preCompact = input as PreCompactHookInput;
     const transcriptPath = preCompact.transcript_path;
     const sessionId = preCompact.session_id;
@@ -205,7 +205,7 @@ function createPreCompactHook(assistantName?: string): HookCallback {
 }
 
 function createSanitizeBashHook(): HookCallback {
-  return async (input) => {
+  return async (input: unknown) => {
     const preInput = input as PreToolUseHookInput;
     const command = (preInput.tool_input as { command?: string })?.command;
     if (!command) return {};
