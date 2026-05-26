@@ -354,6 +354,7 @@ export class ClaudeEngine implements AgentEngine {
         } else {
           ctx.log('Interrupt arrived before query handle was bound; ignoring');
         }
+        clearAllToolHeartbeats('interrupted');
         for (const text of interrupts) {
           if (text) {
             ctx.log(
@@ -377,6 +378,77 @@ export class ClaudeEngine implements AgentEngine {
     let lastAssistantUuid: string | undefined;
     let messageCount = 0;
     let resultCount = 0;
+
+    // Per-query telemetry: track in-flight tool calls so we can (a) emit a
+    // "still running …Ns" heartbeat every HEARTBEAT_INTERVAL_MS to keep the
+    // UI alive during long bash/MCP calls, and (b) record per-call duration
+    // + outcome to a JSONL for later skill-violation analysis. The JSONL
+    // lives on NFS via the /workspace/group mount, so the host can `tail` /
+    // `jq` it without entering the container.
+    const HEARTBEAT_INTERVAL_MS = 30_000;
+    const TELEMETRY_PATH = '/workspace/group/.matclaw/tool-timings.jsonl';
+    interface ToolCallState {
+      name: string;
+      inputSummary: string;
+      startTime: number;
+      heartbeat: NodeJS.Timeout;
+    }
+    const toolCalls = new Map<string, ToolCallState>();
+
+    const startToolHeartbeat = (
+      toolUseId: string,
+      name: string,
+      input: unknown,
+    ): void => {
+      const startTime = Date.now();
+      const inputSummary = summarizeToolInput(name, input);
+      const heartbeat = setInterval(() => {
+        const elapsedSec = Math.round((Date.now() - startTime) / 1000);
+        emitProgress(
+          ctx,
+          'heartbeat',
+          `Still running ${name}: ${inputSummary} (${elapsedSec}s elapsed)`,
+        );
+      }, HEARTBEAT_INTERVAL_MS);
+      toolCalls.set(toolUseId, { name, inputSummary, startTime, heartbeat });
+    };
+
+    const stopToolHeartbeat = (
+      toolUseId: string,
+      outcome: 'completed' | 'interrupted',
+    ): void => {
+      const entry = toolCalls.get(toolUseId);
+      if (!entry) return;
+      clearInterval(entry.heartbeat);
+      toolCalls.delete(toolUseId);
+      const durationMs = Date.now() - entry.startTime;
+      const record = {
+        ts: new Date().toISOString(),
+        tool_use_id: toolUseId,
+        tool_name: entry.name,
+        duration_ms: durationMs,
+        input_summary: entry.inputSummary.slice(0, 220),
+        outcome,
+        session_id: newSessionId || null,
+        group_folder: ctx.groupFolder,
+      };
+      try {
+        fs.mkdirSync(path.dirname(TELEMETRY_PATH), { recursive: true });
+        fs.appendFileSync(TELEMETRY_PATH, JSON.stringify(record) + '\n');
+      } catch (err) {
+        ctx.log(
+          `Failed to write tool timing telemetry: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    };
+
+    const clearAllToolHeartbeats = (
+      outcome: 'completed' | 'interrupted',
+    ): void => {
+      for (const toolUseId of Array.from(toolCalls.keys())) {
+        stopToolHeartbeat(toolUseId, outcome);
+      }
+    };
 
     // Load global CLAUDE.md
     const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
@@ -510,6 +582,9 @@ export class ClaudeEngine implements AgentEngine {
                 'tool',
                 `Using ${block.name || 'tool'}: ${summarizeToolInput(block.name, block.input)}`,
               );
+              if (block.id && block.name) {
+                startToolHeartbeat(block.id, block.name, block.input);
+              }
             }
           }
         }
@@ -528,6 +603,9 @@ export class ClaudeEngine implements AgentEngine {
         if (msg.message?.content) {
           for (const block of msg.message.content) {
             if (block.type === 'tool_result') {
+              if (block.tool_use_id) {
+                stopToolHeartbeat(block.tool_use_id, 'completed');
+              }
               const resultStr =
                 typeof block.content === 'string'
                   ? block.content
@@ -575,6 +653,10 @@ export class ClaudeEngine implements AgentEngine {
     }
 
     ipcPolling = false;
+    // Any tool calls still in-flight at loop exit (close sentinel, stream
+    // end, or interrupted query) get their heartbeats cleared and a final
+    // telemetry record with outcome:'interrupted'.
+    clearAllToolHeartbeats(closedDuringQuery ? 'interrupted' : 'completed');
     ctx.log(
       `Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`,
     );
