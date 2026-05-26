@@ -285,7 +285,7 @@ function summarizeToolInput(name: string | undefined, input: unknown): string {
 
 function emitProgress(
   ctx: EngineContext,
-  progressType: 'assistant' | 'tool',
+  progressType: 'assistant' | 'tool' | 'heartbeat',
   text: string,
 ): void {
   const progress = compactProgressText(text);
