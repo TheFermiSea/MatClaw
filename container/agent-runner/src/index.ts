@@ -101,6 +101,10 @@ function shouldClose(): boolean {
   return false;
 }
 
+// Drain only files with type:'message'. Leaves type:'interrupt' files for
+// drainIpcInterrupts() to handle. Malformed files are deleted to avoid stuck
+// state. This split lets the active engine handle interrupts on a separate
+// code path (calling query.interrupt()) from normal message piping.
 function drainIpcInput(): string[] {
   try {
     fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
@@ -112,26 +116,74 @@ function drainIpcInput(): string[] {
     const messages: string[] = [];
     for (const file of files) {
       const filePath = path.join(IPC_INPUT_DIR, file);
+      let data: { type?: string; text?: string };
       try {
-        const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-        fs.unlinkSync(filePath);
-        if (data.type === 'message' && data.text) {
-          messages.push(data.text);
-        }
+        data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
       } catch (err) {
         log(
-          `Failed to process input file ${file}: ${err instanceof Error ? err.message : String(err)}`,
+          `Failed to parse input file ${file}: ${err instanceof Error ? err.message : String(err)}`,
         );
         try {
           fs.unlinkSync(filePath);
         } catch {
           /* ignore */
         }
+        continue;
+      }
+      if (data.type === 'interrupt') {
+        // Leave for drainIpcInterrupts(); do not consume.
+        continue;
+      }
+      if (data.type === 'message' && data.text) {
+        messages.push(data.text);
+      }
+      try {
+        fs.unlinkSync(filePath);
+      } catch {
+        /* ignore */
       }
     }
     return messages;
   } catch (err) {
     log(`IPC drain error: ${err instanceof Error ? err.message : String(err)}`);
+    return [];
+  }
+}
+
+// Drain only files with type:'interrupt'. Returns the text payloads (may
+// include empty strings for bare `/interrupt` signals). Caller is responsible
+// for invoking query.interrupt() and pushing non-empty texts into the active
+// MessageStream. Files of other types are left untouched for drainIpcInput().
+function drainIpcInterrupts(): string[] {
+  try {
+    fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
+    const files = fs
+      .readdirSync(IPC_INPUT_DIR)
+      .filter((f) => f.endsWith('.json'))
+      .sort();
+
+    const interrupts: string[] = [];
+    for (const file of files) {
+      const filePath = path.join(IPC_INPUT_DIR, file);
+      try {
+        const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+        if (data.type === 'interrupt') {
+          interrupts.push(typeof data.text === 'string' ? data.text : '');
+          try {
+            fs.unlinkSync(filePath);
+          } catch {
+            /* ignore */
+          }
+        }
+      } catch {
+        // Malformed — leave for drainIpcInput() to clean up.
+      }
+    }
+    return interrupts;
+  } catch (err) {
+    log(
+      `IPC interrupt drain error: ${err instanceof Error ? err.message : String(err)}`,
+    );
     return [];
   }
 }
@@ -362,6 +414,7 @@ async function main(): Promise<void> {
     log,
     shouldClose,
     drainIpcInput,
+    drainIpcInterrupts,
     refreshSdkEnv,
   };
 

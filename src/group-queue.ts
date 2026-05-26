@@ -216,6 +216,13 @@ export class GroupQueue {
   /**
    * Send a follow-up message to the active container via IPC file.
    * Returns true if the message was written, false if no active container.
+   *
+   * Recognizes a steering prefix at the start of the text: `/interrupt`,
+   * `/stop`, or `/steer` (case-insensitive). When present, writes the IPC
+   * file with `type: 'interrupt'` so the container calls `query.interrupt()`
+   * before consuming the rest of the text as a new turn's prompt. A bare
+   * `/interrupt` with no follow-up text still cancels the current turn —
+   * the agent will be reset and idle for the next message.
    */
   sendMessage(groupJid: string, text: string): boolean {
     const state = this.getGroup(groupJid);
@@ -225,6 +232,16 @@ export class GroupQueue {
 
     // Refresh secrets so the container picks up any renewed OAuth tokens
     this.writeSecrets(state.groupFolder);
+
+    const interruptMatch = text.match(
+      /^\s*\/(?:interrupt|stop|steer)(?:\s+([\s\S]+?))?\s*$/i,
+    );
+    const messageType: 'message' | 'interrupt' = interruptMatch
+      ? 'interrupt'
+      : 'message';
+    const messageText = interruptMatch
+      ? (interruptMatch[1] || '').trim()
+      : text;
 
     const inputDir = path.join(DATA_DIR, 'ipc', state.groupFolder, 'input');
     try {
@@ -240,7 +257,10 @@ export class GroupQueue {
       const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}.json`;
       const filepath = path.join(inputDir, filename);
       const tempPath = `${filepath}.tmp`;
-      fs.writeFileSync(tempPath, JSON.stringify({ type: 'message', text }));
+      fs.writeFileSync(
+        tempPath,
+        JSON.stringify({ type: messageType, text: messageText }),
+      );
       fs.renameSync(tempPath, filepath);
       return true;
     } catch {

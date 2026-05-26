@@ -311,7 +311,18 @@ export class ClaudeEngine implements AgentEngine {
     const stream = new MessageStream();
     stream.push(prompt);
 
-    // Poll IPC for follow-up messages and _close sentinel during the query
+    // The Query handle is assigned below right before the for-await loop;
+    // pollIpc captures it by closure so interrupts can call q.interrupt().
+    let q: ReturnType<typeof query> | null = null;
+
+    // Poll IPC for follow-up messages, interrupts, and _close sentinel during
+    // the query. Three signal classes:
+    //   _close          → end stream, exit the for-await loop
+    //   interrupt files → call q.interrupt() (async, fire-and-forget) and push
+    //                     follow-up text into the stream; the SDK will resume
+    //                     on the next turn boundary with the new instruction
+    //   message files   → push directly into the stream as additional user
+    //                     turns (consumed at the next turn boundary)
     let ipcPolling = true;
     let closedDuringQuery = false;
     const pollIpc = () => {
@@ -324,6 +335,35 @@ export class ClaudeEngine implements AgentEngine {
         return;
       }
       ctx.refreshSdkEnv(ctx.sdkEnv);
+
+      const interrupts = ctx.drainIpcInterrupts
+        ? ctx.drainIpcInterrupts()
+        : [];
+      if (interrupts.length > 0) {
+        ctx.log(
+          `Interrupt signal received (${interrupts.length} pending); calling query.interrupt()`,
+        );
+        if (q) {
+          q.interrupt().then(
+            () => ctx.log('query.interrupt() acknowledged'),
+            (err: unknown) =>
+              ctx.log(
+                `query.interrupt() failed: ${err instanceof Error ? err.message : String(err)}`,
+              ),
+          );
+        } else {
+          ctx.log('Interrupt arrived before query handle was bound; ignoring');
+        }
+        for (const text of interrupts) {
+          if (text) {
+            ctx.log(
+              `Piping post-interrupt instruction into stream (${text.length} chars)`,
+            );
+            stream.push(text);
+          }
+        }
+      }
+
       const messages = ctx.drainIpcInput();
       for (const text of messages) {
         ctx.log(`Piping IPC message into active query (${text.length} chars)`);
@@ -368,7 +408,7 @@ export class ClaudeEngine implements AgentEngine {
       delete ctx.sdkEnv['CLAUDE_CODE_MODEL'];
     }
 
-    for await (const message of query({
+    q = query({
       prompt: stream,
       options: {
         cwd: '/workspace/group',
@@ -428,7 +468,9 @@ export class ClaudeEngine implements AgentEngine {
           PreToolUse: [{ matcher: 'Bash', hooks: [createSanitizeBashHook()] }],
         },
       },
-    })) {
+    });
+
+    for await (const message of q) {
       messageCount++;
       const msgType =
         message.type === 'system'

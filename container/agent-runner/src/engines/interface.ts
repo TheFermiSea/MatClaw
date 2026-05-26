@@ -30,6 +30,7 @@ export interface EngineContext {
   log: (message: string) => void;
   shouldClose: () => boolean;
   drainIpcInput: () => string[];
+  drainIpcInterrupts?: () => string[];
   refreshSdkEnv: (env: Record<string, string | undefined>) => void;
 }
 
