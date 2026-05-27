@@ -10,6 +10,7 @@ import {
   HookCallback,
   PreCompactHookInput,
   PreToolUseHookInput,
+  type SdkBeta,
 } from '@anthropic-ai/claude-agent-sdk';
 import { AgentEngine, EngineContext, QueryResult } from './interface.js';
 
@@ -480,6 +481,26 @@ export class ClaudeEngine implements AgentEngine {
       delete ctx.sdkEnv['CLAUDE_CODE_MODEL'];
     }
 
+    // ── Anthropic-Beta headers ─────────────────────────────────────
+    //
+    // P0.3 (beefcake-qq322): enable the Structured Outputs beta so
+    // tools that declare Pydantic-derived JSON schemas (Phase 2 MCP
+    // wrappers — CalcReport, ConvergenceVerdict, etc.) get strict
+    // schema enforcement on tool-result roundtrips.
+    // Spec: https://platform.claude.com/docs/en/build-with-claude/structured-outputs
+    //
+    // SDK 0.2.34 declares `SdkBeta = 'context-1m-2025-08-07'` only, so
+    // the new beta identifier needs a cast until the SDK union widens
+    // upstream. The underlying `@anthropic-ai/sdk` forwards the array
+    // verbatim as the `anthropic-beta` HTTP header (comma-joined), so
+    // the runtime behavior is correct; only the typecheck needs help.
+    // TODO(P0.3): drop the cast once claude-agent-sdk publishes a
+    //             version with 'structured-outputs-2025-11-13' in
+    //             SdkBeta.
+    const betas: SdkBeta[] = [
+      'structured-outputs-2025-11-13' as unknown as SdkBeta,
+    ];
+
     q = query({
       prompt: stream,
       options: {
@@ -487,6 +508,7 @@ export class ClaudeEngine implements AgentEngine {
         additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
         resume: sessionId,
         resumeSessionAt: resumeAt,
+        betas,
         systemPrompt: globalClaudeMd
           ? {
               type: 'preset' as const,

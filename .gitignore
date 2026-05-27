@@ -49,3 +49,6 @@ test.sh
 docs/lobster-competition/
 examples/al_li_phase_diagram/
 external-ref/
+
+# Phase 0 schema codegen byproducts
+**/__pycache__/
