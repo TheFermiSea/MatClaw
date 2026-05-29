@@ -388,6 +388,13 @@ function buildContainerArgs(
   args.push('-e', 'HOME=/home/node');
   args.push('-e', `PATH=${containerPath}`);
 
+  // Materials Project (mp) MCP runs as a nested `docker run`, so the agent
+  // container needs the host docker socket (bead beefcake-b8ux0). SECURITY:
+  // this grants the LLM-driven agent host-root-equivalent docker access; it is
+  // acceptable here because the deployment is private (Tailnet) and the agent
+  // already runs as root for MPI/compute. Operator-approved 2026-05-29.
+  args.push('-v', '/var/run/docker.sock:/var/run/docker.sock');
+
   // Pass agent engine and model selection to container.
   // Read fresh from .env each time so users can switch without restarting.
   const freshConfig = readEnvFile(['AGENT_ENGINE', 'AGENT_MODEL']);
