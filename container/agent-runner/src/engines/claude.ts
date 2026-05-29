@@ -630,7 +630,24 @@ export class ClaudeEngine implements AgentEngine {
     const endpointValue = (key: string, fallback: string): string => {
       const raw = envValue(key);
       const endpoint = raw || fallback;
-      return endpoint.endsWith('/sse') ? endpoint : `${endpoint.replace(/\/$/, '')}/sse`;
+      // These MCP servers use streamable-HTTP (`type: 'http'`), served at an
+      // explicit path (e.g. graphiti's "/mcp/"). Respect a configured path
+      // verbatim. Only bare host[:port] endpoints get the legacy "/sse"
+      // suffix (SSE-transport fallback). Previously this unconditionally
+      // appended "/sse", rewriting ".../mcp/" -> ".../mcp/sse" (404) and
+      // silently breaking the graphiti memory layer + onCalcReport TZ hook.
+      let parsed: URL | null = null;
+      try {
+        parsed = new URL(endpoint);
+      } catch {
+        parsed = null;
+      }
+      const hasExplicitPath =
+        parsed !== null && parsed.pathname !== '' && parsed.pathname !== '/';
+      if (hasExplicitPath || endpoint.endsWith('/sse')) {
+        return endpoint;
+      }
+      return `${endpoint.replace(/\/$/, '')}/sse`;
     };
 
     q = query({
