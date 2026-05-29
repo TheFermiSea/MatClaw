@@ -537,6 +537,19 @@ export class ClaudeEngine implements AgentEngine {
           'NotebookEdit',
           'mcp__matclaw__*',
           'mcp__gmail__*',
+          // Phase 1 drop-ins
+          'mcp__vaspilot__*',
+          'mcp__mp__*',
+          'mcp__graphiti__*',
+          'mcp__mem0__*',
+          'mcp__arxiv__*',
+          // Phase 2 wrappers
+          'mcp__pymatgen_inputset__*',
+          'mcp__pymatgen_validation__*',
+          'mcp__atomate2__*',
+          'mcp__jobflow_remote__*',
+          'mcp__mlip__*',
+          'mcp__phonon_gw__*',
         ],
         env: ctx.sdkEnv,
         permissionMode: 'bypassPermissions',
@@ -555,6 +568,66 @@ export class ClaudeEngine implements AgentEngine {
           gmail: {
             command: 'npx',
             args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp'],
+          },
+          // Phase 1 drop-ins
+          vaspilot: {
+            type: 'http',
+            url: 'http://ai-proxy:8933/sse',
+            headers: { 'X-API-Key': process.env.VASPILOT_API_KEY ?? '' },
+          },
+          mp: {
+            // P1.6 audit landed: Docker invocation, image digest-pinned.
+            command: 'docker',
+            args: [
+              'run',
+              '--rm',
+              '-i',
+              '-e',
+              `MP_API_KEY=${process.env.MP_API_KEY ?? ''}`,
+              'benedict2002/materials-project-mcp@sha256:b77c75cd6acb34905c940fdd0a732f0cb62d8957d0f9f964d708dad6f5fd49fd',
+            ],
+          },
+          graphiti: {
+            type: 'http',
+            url: 'http://ai-proxy:8000/sse',
+            headers: { 'X-API-Key': process.env.GRAPHITI_API_KEY ?? '' },
+          },
+          mem0: {
+            type: 'http',
+            url: 'http://ai-proxy:7891/sse',
+            headers: { 'X-API-Key': process.env.MEM0_API_KEY ?? '' },
+          },
+          arxiv: {
+            command: 'uvx',
+            args: ['arxiv-mcp-server@0.5.0'],
+          },
+          // Phase 2 thin wrappers (registered together since all 6 are done)
+          pymatgen_inputset: {
+            command: 'python',
+            args: ['-m', 'matclaw_wrappers.pymatgen_inputset_mcp'],
+          },
+          pymatgen_validation: {
+            command: 'python',
+            args: ['-m', 'matclaw_wrappers.pymatgen_validation_mcp'],
+          },
+          atomate2: {
+            command: 'python',
+            args: ['-m', 'matclaw_wrappers.atomate2_maker_mcp'],
+            env: { JOBFLOW_CONFIG_FILE: '/workspace/group/.jobflow/jobflow.yaml' },
+          },
+          jobflow_remote: {
+            command: 'python',
+            args: ['-m', 'matclaw_wrappers.jobflow_remote_mcp'],
+            env: { JF_REMOTE_PROJECT: 'matclaw' },
+          },
+          mlip: {
+            command: 'python',
+            args: ['-m', 'matclaw_wrappers.mlip_unified_mcp'],
+            env: { MLIP_MODEL_CACHE: '/cluster/shared/mlip-models' },
+          },
+          phonon_gw: {
+            command: 'python',
+            args: ['-m', 'matclaw_wrappers.phonopy_yambopy_mcp'],
           },
         },
         hooks: {
