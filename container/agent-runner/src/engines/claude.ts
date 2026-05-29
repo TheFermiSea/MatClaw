@@ -316,6 +316,7 @@ function emitProgress(
 async function onCalcReport(
   report: CalcReport,
   ctx: EngineContext,
+  inferenceId?: string,
 ): Promise<void> {
   const gatewayUrl =
     ctx.sdkEnv['TENSORZERO_GATEWAY_URL'] ?? process.env['TENSORZERO_GATEWAY_URL'];
@@ -323,6 +324,14 @@ async function onCalcReport(
     return; // no TZ configured; silent no-op
   }
   const value = report.verdict?.verdict === 'pass' ? 1.0 : 0.0;
+  // Tier-1 decision (2026-05-29): use the upstream Claude assistant inference
+  // UUID that decided to launch this calc — the SDK's `assistant.uuid` on the
+  // tool_use parent message. Falls back to report.calc_id only when the
+  // tool_use → inference lookup didn't populate (e.g. a CalcReport surfaced
+  // outside the standard tool_result path). This is what lets TZ's
+  // track_and_stop correlate calc outcomes back to specific prompt variants
+  // in the agent's behaviour rather than aggregating across all calc_ids.
+  const resolvedInferenceId = inferenceId ?? report.calc_id;
   try {
     const response = await fetch(`${gatewayUrl}/feedback`, {
       method: 'POST',
@@ -330,12 +339,14 @@ async function onCalcReport(
       body: JSON.stringify({
         metric_name: 'matclaw_calc_converged',
         value,
-        inference_id: report.calc_id,
+        inference_id: resolvedInferenceId,
         tags: {
           material_class: report.material.material_class ?? 'unknown',
           calc_type: report.calc_type,
           code: report.code,
           functional: report.functional ?? 'unknown',
+          calc_id: report.calc_id,
+          inference_id_source: inferenceId ? 'assistant_uuid' : 'calc_id_fallback',
         },
       }),
     });
@@ -481,6 +492,11 @@ export class ClaudeEngine implements AgentEngine {
 
     let newSessionId: string | undefined;
     let lastAssistantUuid: string | undefined;
+    // Per Tier-1 decision (2026-05-29): correlate every tool_use_id to the
+    // assistant-message UUID that emitted it, so onCalcReport can later
+    // resolve the upstream Claude inference for TZ feedback. Map is per
+    // query() invocation — naturally bounded by the agent's turn count.
+    const toolUseToInferenceId = new Map<string, string>();
     let messageCount = 0;
     let resultCount = 0;
 
@@ -796,6 +812,12 @@ export class ClaudeEngine implements AgentEngine {
               if (block.id && block.name) {
                 startToolHeartbeat(block.id, block.name, block.input);
               }
+              // Pin the upstream assistant inference UUID against this
+              // tool_use_id so onCalcReport can later attribute the
+              // resulting CalcReport back to the inference that planned it.
+              if (block.id && lastAssistantUuid) {
+                toolUseToInferenceId.set(block.id, lastAssistantUuid);
+              }
             }
           }
         }
@@ -832,7 +854,10 @@ export class ClaudeEngine implements AgentEngine {
               // blocks (the common MCP shape). Try all three.
               const candidate = extractCalcReportCandidate(block.content);
               if (candidate && isCalcReportShape(candidate)) {
-                onCalcReport(candidate, ctx).catch(() => {
+                const inferenceId = block.tool_use_id
+                  ? toolUseToInferenceId.get(block.tool_use_id)
+                  : undefined;
+                onCalcReport(candidate, ctx, inferenceId).catch(() => {
                   /* logged inside onCalcReport */
                 });
               }
