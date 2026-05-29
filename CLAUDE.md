@@ -14,6 +14,34 @@
 
 Materials science AI assistant powered by Claude Agent SDK, with integrated computational materials science tools (Quantum ESPRESSO, LAMMPS, RASPA3, MACE, pymatgen, ASE, etc.).
 
+## MatClaw v2 (in progress on `beefcake/agent-steerability`)
+
+This branch carries the v2 redesign — keeping the chat shell, consuming
+materials-science tooling via MCP. See `docs/v2-roadmap.md` for the
+canonical design.
+
+Active MCP namespaces (visible to the agent via `allowedTools`):
+- `mcp__matclaw__*` — chat + scheduling primitives (existing)
+- `mcp__gmail__*` — email integration (existing)
+- `mcp__vaspilot__*` — VASPilot DFT workflow MCP (Phase 1)
+- `mcp__mp__*` — Materials Project (Phase 1; community MCP, MIT, digest-pinned)
+- `mcp__graphiti__*` — bi-temporal entity-graph memory (Phase 1)
+- `mcp__mem0__*` — per-session memory (Phase 1)
+- `mcp__arxiv__*` — arXiv search + semantic indexing (Phase 1)
+- `mcp__pymatgen_inputset__*` — VASP input-set generation (Phase 2)
+- `mcp__pymatgen_validation__*` — VASP validator → ConvergenceVerdict (Phase 2)
+- `mcp__atomate2__*` — atomate2 Flow makers (Phase 2)
+- `mcp__jobflow_remote__*` — remote job submit + poll (Phase 2)
+- `mcp__mlip__*` — unified MACE/CHGNet/MatterSim/MatterGen (Phase 2)
+- `mcp__phonon_gw__*` — phonopy + yambopy (Phase 2)
+
+Active matclaw v2 skills (under `container/skills/materials/`):
+- `materials/research-plan` — pre-execution planner
+- `materials/dry-run-validate` — pre-SLURM-submit gates
+- `materials/parameter-recall` — Graphiti-backed param memory
+- `materials/mlip-screen-vasp-final` — Pareto-tier screening
+- `materials/imaginary-phonon-response` — graduated remedy strategy
+
 ## Quick Context
 
 Single Node.js process with skill-based channel system. Channels (WhatsApp, Telegram, Slack, Discord, Gmail) are skills that self-register at startup. Messages route to Claude Agent SDK running in containers (Linux VMs). Each group has isolated filesystem and memory. Containers include a full materials computation environment with DFT, MD, MC tools and Miniconda for flexible package management.
