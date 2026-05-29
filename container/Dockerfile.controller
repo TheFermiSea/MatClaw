@@ -66,6 +66,9 @@ ENV PATH="/home/node/.local/bin:/opt/conda/bin:$PATH"
 RUN pip install --no-cache-dir \
       numpy scipy matplotlib pandas seaborn \
       pymatgen ase mp-api spglib \
+      "fastmcp>=3.3,<4.0" \
+      pymatgen-io-validation \
+      atomate2 jobflow-remote phonopy \
       notebooklm-mcp-cli==0.6.10
 
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium-browser
@@ -82,6 +85,12 @@ WORKDIR /app
 COPY agent-runner/package*.json ./
 RUN npm install
 COPY agent-runner/ ./
+
+# MatClaw v2 FastMCP wrappers are owned in the sibling beefcake-swarm repo and
+# staged into this build context by container/build.sh.
+COPY .matclaw-v2-python/ /opt/matclaw-v2-python/
+ENV PYTHONPATH="/opt/matclaw-v2-python:${PYTHONPATH}"
+
 RUN npm run build
 
 RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input

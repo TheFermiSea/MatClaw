@@ -16,6 +16,8 @@ cd "$SCRIPT_DIR"
 
 IMAGE_NAME="matclaw-agent"
 CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-docker}"
+BEEFCAKE_SWARM_DIR="${BEEFCAKE_SWARM_DIR:-$(cd "$SCRIPT_DIR/../.." && pwd)/beefcake-swarm}"
+V2_STAGE_DIR="$SCRIPT_DIR/.matclaw-v2-python"
 TAG=""
 CUDA=false
 CONTROLLER=false
@@ -77,6 +79,32 @@ NETWORK_ARG=""
 if [ -n "$BUILD_NETWORK" ]; then
   NETWORK_ARG="--network=${BUILD_NETWORK}"
 fi
+
+stage_matclaw_v2_python() {
+  local wrappers_src="$BEEFCAKE_SWARM_DIR/python/matclaw_wrappers"
+  local schemas_src="$BEEFCAKE_SWARM_DIR/python/matclaw_schemas"
+
+  if [ ! -d "$wrappers_src" ] || [ ! -d "$schemas_src" ]; then
+    echo "ERROR: MatClaw v2 wrapper packages not found." >&2
+    echo "Expected:" >&2
+    echo "  $wrappers_src" >&2
+    echo "  $schemas_src" >&2
+    echo "Set BEEFCAKE_SWARM_DIR=/path/to/beefcake-swarm if the repos are not siblings." >&2
+    exit 1
+  fi
+
+  rm -rf "$V2_STAGE_DIR"
+  mkdir -p "$V2_STAGE_DIR"
+  cp -a "$wrappers_src" "$V2_STAGE_DIR/"
+  cp -a "$schemas_src" "$V2_STAGE_DIR/"
+}
+
+cleanup_matclaw_v2_python() {
+  rm -rf "$V2_STAGE_DIR"
+}
+
+trap cleanup_matclaw_v2_python EXIT
+stage_matclaw_v2_python
 
 ${CONTAINER_RUNTIME} build ${NETWORK_ARG} ${BUILD_ARGS} -f "${DOCKERFILE}" -t "${IMAGE_NAME}:${TAG}" .
 

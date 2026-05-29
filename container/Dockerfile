@@ -209,7 +209,10 @@ RUN pip install --no-cache-dir \
     pymatgen ase mp-api spglib \
     mace-torch \
     e3nn \
-    chgnet sevenn matgl
+    chgnet sevenn matgl \
+    "fastmcp>=3.3,<4.0" \
+    pymatgen-io-validation \
+    atomate2 jobflow-remote phonopy
 
 # Install NotebookLM CLI/MCP into the base image so agents do not need to
 # install it at task runtime. Keep /home/node/.local/bin on PATH as well for
@@ -244,6 +247,11 @@ RUN npm install
 
 # Copy source code
 COPY agent-runner/ ./
+
+# MatClaw v2 FastMCP wrappers are owned in the sibling beefcake-swarm repo and
+# staged into this build context by container/build.sh.
+COPY .matclaw-v2-python/ /opt/matclaw-v2-python/
+ENV PYTHONPATH="/opt/matclaw-v2-python:${PYTHONPATH}"
 
 # Build TypeScript
 RUN npm run build

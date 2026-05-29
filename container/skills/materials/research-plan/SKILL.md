@@ -70,7 +70,7 @@ The planner is a thinking step, not a compute step, so most MCP calls in this sk
 | Recall prior similar calculations | `mcp__graphiti__search_similar` | ALWAYS call; record hit/miss in plan |
 | Discover stored convergence parameters | `mcp__graphiti__search_nodes` | Filter by material class + calc_type |
 | Pre-pin validator rules (do not run them yet) | `mcp__pymatgen_validation__validator_rules` | Returns the rule set the dry-run-validate skill will fire later |
-| Probe SLURM queue depth (cost-of-plan estimate) | `mcp__jobflow_remote__queue_status` | Optional; informs tier ladder cutoffs |
+| Probe configured SLURM workers (cost-of-plan estimate) | `mcp__jobflow_remote__list_workers` | Optional; confirms jobflow-remote is reachable before planning a submit |
 
 Do NOT call solver-running tools (`mcp__atomate2__*`, `mcp__vaspilot__*`, `mcp__mlip__run`) from this skill. The plan is emitted first; execution happens after the user (or autopilot) approves it.
 

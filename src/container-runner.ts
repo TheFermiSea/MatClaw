@@ -345,6 +345,13 @@ function readSecrets(): Record<string, string> {
     'GOOGLE_API_KEY',
     // Shared
     'MP_API_KEY',
+    'GRAPHITI_ENDPOINT',
+    'GRAPHITI_API_KEY',
+    'MEM0_ENDPOINT',
+    'MEM0_API_KEY',
+    'VASPILOT_ENDPOINT',
+    'VASPILOT_API_KEY',
+    'TENSORZERO_GATEWAY_URL',
   ]);
 }
 

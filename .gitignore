@@ -52,3 +52,6 @@ external-ref/
 
 # Phase 0 schema codegen byproducts
 **/__pycache__/
+
+# MatClaw v2 build staging copied from sibling beefcake-swarm repo
+container/.matclaw-v2-python/

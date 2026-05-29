@@ -317,12 +317,14 @@ async function onCalcReport(
   report: CalcReport,
   ctx: EngineContext,
 ): Promise<void> {
-  if (!process.env['TENSORZERO_GATEWAY_URL']) {
+  const gatewayUrl =
+    ctx.sdkEnv['TENSORZERO_GATEWAY_URL'] ?? process.env['TENSORZERO_GATEWAY_URL'];
+  if (!gatewayUrl) {
     return; // no TZ configured; silent no-op
   }
   const value = report.verdict?.verdict === 'pass' ? 1.0 : 0.0;
   try {
-    await fetch(`${process.env['TENSORZERO_GATEWAY_URL']}/feedback`, {
+    const response = await fetch(`${gatewayUrl}/feedback`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -337,6 +339,12 @@ async function onCalcReport(
         },
       }),
     });
+    if (!response.ok) {
+      const body = await response.text().catch(() => '');
+      ctx.log(
+        `onCalcReport TZ feedback rejected: HTTP ${response.status} ${body.slice(0, 500)}`,
+      );
+    }
   } catch (err) {
     // Log but don't throw — TZ feedback is best-effort.
     ctx.log(
@@ -600,6 +608,15 @@ export class ClaudeEngine implements AgentEngine {
       'structured-outputs-2025-11-13' as unknown as SdkBeta,
     ];
 
+    const envValue = (key: string): string => {
+      return ctx.sdkEnv[key] ?? process.env[key] ?? '';
+    };
+    const endpointValue = (key: string, fallback: string): string => {
+      const raw = envValue(key);
+      const endpoint = raw || fallback;
+      return endpoint.endsWith('/sse') ? endpoint : `${endpoint.replace(/\/$/, '')}/sse`;
+    };
+
     q = query({
       prompt: stream,
       options: {
@@ -671,8 +688,8 @@ export class ClaudeEngine implements AgentEngine {
           // Phase 1 drop-ins
           vaspilot: {
             type: 'http',
-            url: 'http://ai-proxy:8933/sse',
-            headers: { 'X-API-Key': process.env.VASPILOT_API_KEY ?? '' },
+            url: endpointValue('VASPILOT_ENDPOINT', 'http://ai-proxy:8933'),
+            headers: { 'X-API-Key': envValue('VASPILOT_API_KEY') },
           },
           mp: {
             // P1.6 audit landed: Docker invocation, image digest-pinned.
@@ -682,19 +699,19 @@ export class ClaudeEngine implements AgentEngine {
               '--rm',
               '-i',
               '-e',
-              `MP_API_KEY=${process.env.MP_API_KEY ?? ''}`,
+              `MP_API_KEY=${envValue('MP_API_KEY')}`,
               'benedict2002/materials-project-mcp@sha256:b77c75cd6acb34905c940fdd0a732f0cb62d8957d0f9f964d708dad6f5fd49fd',
             ],
           },
           graphiti: {
             type: 'http',
-            url: 'http://ai-proxy:8000/sse',
-            headers: { 'X-API-Key': process.env.GRAPHITI_API_KEY ?? '' },
+            url: endpointValue('GRAPHITI_ENDPOINT', 'http://ai-proxy:8000'),
+            headers: { 'X-API-Key': envValue('GRAPHITI_API_KEY') },
           },
           mem0: {
             type: 'http',
-            url: 'http://ai-proxy:7891/sse',
-            headers: { 'X-API-Key': process.env.MEM0_API_KEY ?? '' },
+            url: endpointValue('MEM0_ENDPOINT', 'http://ai-proxy:7891'),
+            headers: { 'X-API-Key': envValue('MEM0_API_KEY') },
           },
           arxiv: {
             command: 'uvx',
