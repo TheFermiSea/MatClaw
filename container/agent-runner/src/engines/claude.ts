@@ -13,6 +13,7 @@ import {
   type SdkBeta,
 } from '@anthropic-ai/claude-agent-sdk';
 import { AgentEngine, EngineContext, QueryResult } from './interface.js';
+import type { CalcReport } from '../schemas/matclaw_v2.js';
 
 // ── SDK message type for MessageStream ──
 
@@ -298,6 +299,101 @@ function emitProgress(
     progressType,
     progress,
   });
+}
+
+// ── P4.2 onCalcReport — TensorZero feedback for matclaw_calc_converged ──
+//
+// Fires asynchronously (fire-and-forget) from the tool_result handler in the
+// main query loop whenever the agent emits a CalcReport via an MCP tool. The
+// hook posts a single feedback datum to TENSORZERO_GATEWAY_URL/feedback with
+// value 1.0 for a passing ConvergenceVerdict and 0.0 otherwise. Tags carry
+// material_class / calc_type / code / functional so TZ's track_and_stop can
+// later learn which compute strategies converge on which material classes.
+//
+// Silent no-op when TENSORZERO_GATEWAY_URL is unset so non-TZ deployments
+// (local dev, CI) still work. Never throws — all errors are logged via the
+// EngineContext.
+async function onCalcReport(
+  report: CalcReport,
+  ctx: EngineContext,
+): Promise<void> {
+  if (!process.env['TENSORZERO_GATEWAY_URL']) {
+    return; // no TZ configured; silent no-op
+  }
+  const value = report.verdict?.verdict === 'pass' ? 1.0 : 0.0;
+  try {
+    await fetch(`${process.env['TENSORZERO_GATEWAY_URL']}/feedback`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        metric_name: 'matclaw_calc_converged',
+        value,
+        inference_id: report.calc_id,
+        tags: {
+          material_class: report.material.material_class ?? 'unknown',
+          calc_type: report.calc_type,
+          code: report.code,
+          functional: report.functional ?? 'unknown',
+        },
+      }),
+    });
+  } catch (err) {
+    // Log but don't throw — TZ feedback is best-effort.
+    ctx.log(
+      `onCalcReport TZ feedback failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
+
+// Heuristic shape-check for CalcReport on tool_result content. The
+// pydantic2ts-generated CalcReport requires material/calc_type/code at top
+// level, so structural presence is a sufficient discriminator from other
+// tool_result payloads (string transcripts, error dicts, etc.).
+function isCalcReportShape(value: unknown): value is CalcReport {
+  if (!value || typeof value !== 'object') return false;
+  const obj = value as Record<string, unknown>;
+  return (
+    typeof obj['calc_id'] === 'string' &&
+    typeof obj['calc_type'] === 'string' &&
+    typeof obj['code'] === 'string' &&
+    !!obj['material'] &&
+    typeof obj['material'] === 'object'
+  );
+}
+
+// Pull a candidate object out of tool_result.content, which the Anthropic
+// SDK can deliver as:
+//   • a raw object (structured-outputs beta returning the parsed value)
+//   • a string (JSON-serialized)
+//   • an array of content blocks (the typical MCP shape; concat the .text
+//     fields and JSON.parse). Returns null on any parse failure.
+function extractCalcReportCandidate(content: unknown): unknown | null {
+  if (!content) return null;
+  if (typeof content === 'object' && !Array.isArray(content)) {
+    return content;
+  }
+  let raw: string | null = null;
+  if (typeof content === 'string') {
+    raw = content;
+  } else if (Array.isArray(content)) {
+    raw = content
+      .map((b) => {
+        if (b && typeof b === 'object') {
+          const text = (b as { text?: unknown }).text;
+          return typeof text === 'string' ? text : '';
+        }
+        return '';
+      })
+      .join('');
+  }
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (!trimmed.startsWith('{')) return null;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return null;
+  }
 }
 
 export class ClaudeEngine implements AgentEngine {
@@ -635,6 +731,18 @@ export class ClaudeEngine implements AgentEngine {
               ctx.log(
                 `[ToolResult] (id: ${block.tool_use_id}) ${resultStr.slice(0, 3000)}`,
               );
+
+              // P4.2: detect CalcReport shape in tool_result content and emit
+              // TZ feedback. Fire-and-forget — never blocks the agent loop.
+              // The content can be a raw object (structured outputs beta),
+              // a string (JSON serialized), or an array of text content
+              // blocks (the common MCP shape). Try all three.
+              const candidate = extractCalcReportCandidate(block.content);
+              if (candidate && isCalcReportShape(candidate)) {
+                onCalcReport(candidate, ctx).catch(() => {
+                  /* logged inside onCalcReport */
+                });
+              }
             }
           }
         }
