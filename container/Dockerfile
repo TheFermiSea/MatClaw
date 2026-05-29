@@ -256,6 +256,21 @@ ENV PYTHONPATH="/opt/matclaw-v2-python:${PYTHONPATH}"
 # Build TypeScript
 RUN npm run build
 
+# v2 ecosystem drop-in launchers (bead beefcake-b8ux0):
+#  - uv/uvx: the arxiv MCP server is `command: uvx arxiv-mcp-server@0.5.0`.
+#  - docker CLI: the Materials Project MCP is `command: docker run ...` (nested).
+#    NOTE: mp ALSO requires the orchestrator to bind-mount /var/run/docker.sock
+#    into the agent container (container-runner.js) — that is a separate
+#    security-sensitive change tracked in b8ux0; this only provides the client.
+# Placed last so the heavy QE/LAMMPS/torch/npm layers above stay cache-valid.
+RUN pip install --no-cache-dir uv && \
+    DOCKER_CLI_VER=27.5.1 && \
+    curl -fsSL "https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_CLI_VER}.tgz" -o /tmp/docker.tgz && \
+    tar -xzf /tmp/docker.tgz -C /tmp && \
+    install -m 0755 /tmp/docker/docker /usr/local/bin/docker && \
+    rm -rf /tmp/docker.tgz /tmp/docker && \
+    /usr/local/bin/docker --version && uvx --version
+
 # Create workspace directories
 RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input
 
