@@ -534,6 +534,22 @@ matclaw/
 - [ ] Workflow automation (multi-step calculation pipelines)
 - [ ] Jupyter notebook generation for reproducibility
 
+## MatClaw v2 (in progress)
+
+A redesign keeping the chat shell, consuming materials-science tooling
+via MCP. Tracked on the `beefcake/agent-steerability` branch with the
+canonical design in `docs/v2-roadmap.md`. Adds:
+- 6 Phase 2 thin wrappers (pymatgen-vasp-inputset, pymatgen-io-validation,
+  atomate2, jobflow-remote, MLIP-unified, phonopy+yambopy) in the sibling
+  beefcake-swarm repo's `python/matclaw_wrappers/`
+- 5 new SKILL.md families under `container/skills/materials/`
+- Structured-output Pydantic schemas (`container/agent-runner/src/schemas/matclaw_v2.{py,ts}`)
+- TensorZero feedback metric `matclaw_calc_converged` for downstream
+  track_and_stop (n≥50 per class to activate)
+
+Main remains untouched as production; v2 lands on the feature branch
+until validated end-to-end.
+
 ## Citation
 
 If you use MatClaw in your research, please cite:

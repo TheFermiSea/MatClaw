@@ -519,10 +519,13 @@ export class ClaudeEngine implements AgentEngine {
       clearInterval(entry.heartbeat);
       toolCalls.delete(toolUseId);
       const durationMs = Date.now() - entry.startTime;
+      const mcpMatch = entry.name.match(/^mcp__([^_]+(?:_[^_]+)*?)__/);
+      const mcpServer = mcpMatch ? mcpMatch[1] : null;
       const record = {
         ts: new Date().toISOString(),
         tool_use_id: toolUseId,
         tool_name: entry.name,
+        mcp_server: mcpServer, // P5.1 — namespace extracted from tool_name; null for native tools
         duration_ms: durationMs,
         input_summary: entry.inputSummary.slice(0, 220),
         outcome,
