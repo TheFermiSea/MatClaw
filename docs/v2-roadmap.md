@@ -268,7 +268,14 @@ mcpServers: {
   // ---- Phase 1 drop-ins ----
 
   vaspilot: {
-    // VASPilot ships its own MCP server (arXiv:2508.07035)
+    // VASPilot ships its own MCP server (arXiv:2508.07035).
+    // P1.1 update (2026-05-29): VASPilot's LLM backend (used internally
+    // for its agentic planning steps) routes through CLIAPIProxy on
+    // ai-proxy:8317 with SWARM_CLOUD_API_KEY — see vaspilot service's
+    // OPENAI_BASE_URL / ANTHROPIC_BASE_URL env vars in
+    // infrastructure/matclaw-v2/docker-compose.yml. No separate Anthropic
+    // key needed. The VASPILOT_API_KEY below is for VASPilot's OWN HTTP
+    // gateway auth (rate limiting), not an LLM credential.
     type: 'http',
     url: 'http://ai-proxy:8933/sse',
     headers: { 'X-API-Key': process.env.VASPILOT_API_KEY ?? '' },
