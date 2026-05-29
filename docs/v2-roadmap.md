@@ -274,9 +274,21 @@ mcpServers: {
     headers: { 'X-API-Key': process.env.VASPILOT_API_KEY ?? '' },
   },
   mp: {
-    // Materials Project — community wrapper or official mp_api>=0.46
-    command: 'uvx',
-    args: ['materials-project-mcp', '--api-key', process.env.MP_API_KEY ?? ''],
+    // Materials Project — community wrapper (benedictdebrah).
+    // P1.6 audit (2026-05-29): repo MIT-licensed, solo author (10 stars),
+    // last pushed 2026-05-20. mp_api 0.46 confirmed to have NO built-in
+    // MCP submodule. fair2wise/materials_project_mcp alternative is stale
+    // (1 star, abandoned 2025-06). The community wrapper is not on PyPI
+    // and has no Python entry-point — Docker is the upstream-recommended
+    // invocation, with image digest pinned per the §5 risk-inventory
+    // "audit any solo-author repo before adoption" requirement.
+    command: 'docker',
+    args: [
+      'run', '--rm', '-i',
+      '-e', `MP_API_KEY=${process.env.MP_API_KEY ?? ''}`,
+      // Pinned to the audited image; bump after re-audit:
+      'benedict2002/materials-project-mcp@sha256:b77c75cd6acb34905c940fdd0a732f0cb62d8957d0f9f964d708dad6f5fd49fd',
+    ],
   },
   graphiti: {
     // bi-temporal entity graph; runs as docker compose stack on ai-proxy
@@ -291,8 +303,12 @@ mcpServers: {
     headers: { 'X-API-Key': process.env.MEM0_API_KEY ?? '' },
   },
   arxiv: {
+    // arxiv-mcp-server v0.5.0 (Apache-2.0, PyPI). P1.6 install (2026-05-29):
+    // 10 tools verified — search_papers, download_paper, list_papers,
+    // read_paper, get_abstract, semantic_search, reindex, citation_graph,
+    // watch_topic, check_alerts.
     command: 'uvx',
-    args: ['arxiv-mcp-server'],
+    args: ['arxiv-mcp-server@0.5.0'],
   },
 
   // ---- Phase 2 thin wrappers (added incrementally) ----
