@@ -14,6 +14,11 @@ import {
 } from '@anthropic-ai/claude-agent-sdk';
 import { AgentEngine, EngineContext, QueryResult } from './interface.js';
 import type { CalcReport } from '../schemas/matclaw_v2.js';
+import {
+  buildAgentConfig,
+  matclawIntegrations,
+  type EnvAccess,
+} from '../integrations.js';
 
 // ── SDK message type for MessageStream ──
 
@@ -650,31 +655,11 @@ export class ClaudeEngine implements AgentEngine {
       return `${endpoint.replace(/\/$/, '')}/sse`;
     };
 
-    // Register an optional streamable-HTTP MCP drop-in ONLY when its endpoint is
-    // explicitly configured. Without this guard an undeployed service falls back
-    // to a hard-coded default host, so every agent run attempts a dead
-    // connection (degraded startup + phantom tools the model thinks it has).
-    // Setting <NAME>_ENDPOINT auto-enables the server — keeps optional
-    // integrations portable across deployments (a cluster without a given
-    // service simply omits its env vars).
-    const httpMcpIfConfigured = (
-      name: string,
-      endpointKey: string,
-      apiKeyKey: string,
-    ): Record<
-      string,
-      { type: 'http'; url: string; headers: Record<string, string> }
-    > => {
-      if (!envValue(endpointKey)) return {};
-      return {
-        [name]: {
-          type: 'http',
-          // endpointKey is guaranteed present by the guard above, so no fallback.
-          url: endpointValue(endpointKey),
-          headers: { 'X-API-Key': envValue(apiKeyKey) },
-        },
-      };
-    };
+    // Derive the MCP catalog + allowedTools globs from the single integration
+    // registry (see integrations.ts / CONTEXT.md). envValue/endpointValue are
+    // the injected env seam; http integrations self-gate on their endpoint env.
+    const envAccess: EnvAccess = { value: envValue, endpoint: endpointValue };
+    const agentConfig = buildAgentConfig(matclawIntegrations(ctx), envAccess);
 
     q = query({
       prompt: stream,
@@ -710,89 +695,13 @@ export class ClaudeEngine implements AgentEngine {
           'ToolSearch',
           'Skill',
           'NotebookEdit',
-          'mcp__matclaw__*',
-          'mcp__gmail__*',
-          // Phase 1 drop-ins
-          'mcp__mp__*',
-          'mcp__graphiti__*',
-          'mcp__arxiv__*',
-          // Phase 2 wrappers
-          'mcp__pymatgen_inputset__*',
-          'mcp__pymatgen_validation__*',
-          'mcp__atomate2__*',
-          'mcp__jobflow_remote__*',
-          'mcp__mlip__*',
-          'mcp__phonon_gw__*',
+          ...agentConfig.allowedTools,
         ],
         env: ctx.sdkEnv,
         permissionMode: 'bypassPermissions',
         allowDangerouslySkipPermissions: true,
         settingSources: ['project', 'user'],
-        mcpServers: {
-          matclaw: {
-            command: 'node',
-            args: [ctx.mcpServerPath],
-            env: {
-              MATCLAW_CHAT_JID: ctx.chatJid,
-              MATCLAW_GROUP_FOLDER: ctx.groupFolder,
-              MATCLAW_IS_MAIN: ctx.isMain ? '1' : '0',
-            },
-          },
-          gmail: {
-            command: 'npx',
-            args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp'],
-          },
-          // Phase 1 drop-ins
-          mp: {
-            // P1.6 audit landed: Docker invocation, image digest-pinned.
-            command: 'docker',
-            args: [
-              'run',
-              '--rm',
-              '-i',
-              '-e',
-              `MP_API_KEY=${envValue('MP_API_KEY')}`,
-              'benedict2002/materials-project-mcp@sha256:b77c75cd6acb34905c940fdd0a732f0cb62d8957d0f9f964d708dad6f5fd49fd',
-            ],
-          },
-          ...httpMcpIfConfigured(
-            'graphiti',
-            'GRAPHITI_ENDPOINT',
-            'GRAPHITI_API_KEY',
-          ),
-          arxiv: {
-            command: 'uvx',
-            args: ['arxiv-mcp-server@0.5.0'],
-          },
-          // Phase 2 thin wrappers (registered together since all 6 are done)
-          pymatgen_inputset: {
-            command: 'python',
-            args: ['-m', 'matclaw_wrappers.pymatgen_inputset_mcp'],
-          },
-          pymatgen_validation: {
-            command: 'python',
-            args: ['-m', 'matclaw_wrappers.pymatgen_validation_mcp'],
-          },
-          atomate2: {
-            command: 'python',
-            args: ['-m', 'matclaw_wrappers.atomate2_maker_mcp'],
-            env: { JOBFLOW_CONFIG_FILE: '/workspace/group/.jobflow/jobflow.yaml' },
-          },
-          jobflow_remote: {
-            command: 'python',
-            args: ['-m', 'matclaw_wrappers.jobflow_remote_mcp'],
-            env: { JF_REMOTE_PROJECT: 'matclaw' },
-          },
-          mlip: {
-            command: 'python',
-            args: ['-m', 'matclaw_wrappers.mlip_unified_mcp'],
-            env: { MLIP_MODEL_CACHE: '/cluster/shared/mlip-models' },
-          },
-          phonon_gw: {
-            command: 'python',
-            args: ['-m', 'matclaw_wrappers.phonopy_yambopy_mcp'],
-          },
-        },
+        mcpServers: agentConfig.mcpServers,
         hooks: {
           PreCompact: [{ hooks: [createPreCompactHook(ctx.assistantName)] }],
           PreToolUse: [{ matcher: 'Bash', hooks: [createSanitizeBashHook()] }],

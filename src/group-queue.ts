@@ -4,6 +4,7 @@ import path from 'path';
 
 import { DATA_DIR, MAX_CONCURRENT_CONTAINERS } from './config.js';
 import { readEnvFile } from './env.js';
+import { REFRESH_SECRET_KEYS } from './secret-manifest.js';
 import { logger } from './logger.js';
 
 interface QueuedTask {
@@ -167,22 +168,7 @@ export class GroupQueue {
    * clearing stale keys/base URLs from a previous auth mode or provider.
    */
   private writeSecrets(groupFolder: string): void {
-    const secrets = readEnvFile([
-      'AGENT_ENGINE',
-      'AGENT_MODEL',
-      'ANTHROPIC_AUTH_TOKEN',
-      'ANTHROPIC_API_KEY',
-      'ANTHROPIC_BASE_URL',
-      'CODEX_API_KEY',
-      'OPENAI_API_KEY',
-      'OPENAI_BASE_URL',
-      'CODEX_MODEL',
-      'GOOGLE_API_KEY',
-      'MP_API_KEY',
-      'GRAPHITI_ENDPOINT',
-      'GRAPHITI_API_KEY',
-      'TENSORZERO_GATEWAY_URL',
-    ]);
+    const secrets = readEnvFile([...REFRESH_SECRET_KEYS]);
     if (Object.keys(secrets).length === 0) return;
 
     const ipcDir = path.join(DATA_DIR, 'ipc', groupFolder);

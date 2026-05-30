@@ -23,6 +23,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 import type { AgentEngine } from './engines/interface.js';
+import { agentManagedEnvKeys } from './integrations.js';
 
 interface ContainerInput {
   prompt: string;
@@ -50,22 +51,9 @@ const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_SECRETS_PATH = '/workspace/ipc/_secrets.json';
 const CLAUDE_CREDENTIALS_PATH = '/home/node/.claude/.credentials.json';
 const IPC_POLL_MS = 500;
-const MANAGED_SDK_ENV_KEYS = [
-  'AGENT_MODEL',
-  'CLAUDE_CODE_OAUTH_TOKEN',
-  'ANTHROPIC_AUTH_TOKEN',
-  'ANTHROPIC_API_KEY',
-  'ANTHROPIC_BASE_URL',
-  'CODEX_API_KEY',
-  'OPENAI_API_KEY',
-  'OPENAI_BASE_URL',
-  'CODEX_MODEL',
-  'GOOGLE_API_KEY',
-  'MP_API_KEY',
-  'GRAPHITI_ENDPOINT',
-  'GRAPHITI_API_KEY',
-  'TENSORZERO_GATEWAY_URL',
-] as const;
+// Derived from the integration registry (base env + every integration's
+// envKeys) so it cannot drift from the agent's MCP catalog. Includes ASTA.
+const MANAGED_SDK_ENV_KEYS = agentManagedEnvKeys();
 
 async function readStdin(): Promise<string> {
   return new Promise((resolve, reject) => {

@@ -20,6 +20,7 @@ import {
   TIMEZONE,
 } from './config.js';
 import { readEnvFile } from './env.js';
+import { SHARED_SECRET_KEYS } from './secret-manifest.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import {
@@ -326,29 +327,7 @@ function buildVolumeMounts(
  * Secrets are never written to disk or mounted as files.
  */
 function readSecrets(): Record<string, string> {
-  return readEnvFile([
-    // Claude Agent SDK
-    'ANTHROPIC_AUTH_TOKEN',
-    'ANTHROPIC_API_KEY',
-    'ANTHROPIC_BASE_URL',
-    // Asta CLI / agent auth
-    'ASTA_TOKEN',
-    'ASTA_API_KEY',
-    'ASTA_A2A_API_KEY',
-    'ASTA_GATEWAY_URL',
-    // Codex SDK (OpenAI-compatible)
-    'CODEX_API_KEY',
-    'OPENAI_API_KEY',
-    'OPENAI_BASE_URL',
-    'CODEX_MODEL',
-    // Gemini
-    'GOOGLE_API_KEY',
-    // Shared
-    'MP_API_KEY',
-    'GRAPHITI_ENDPOINT',
-    'GRAPHITI_API_KEY',
-    'TENSORZERO_GATEWAY_URL',
-  ]);
+  return readEnvFile([...SHARED_SECRET_KEYS]);
 }
 
 function buildContainerArgs(
