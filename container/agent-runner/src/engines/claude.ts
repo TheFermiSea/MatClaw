@@ -650,6 +650,31 @@ export class ClaudeEngine implements AgentEngine {
       return `${endpoint.replace(/\/$/, '')}/sse`;
     };
 
+    // Register an optional streamable-HTTP MCP drop-in ONLY when its endpoint is
+    // explicitly configured. Without this guard a deferred/undeployed service
+    // (e.g. mem0 or vaspilot before they ship) falls back to a hard-coded
+    // default host, so every agent run attempts a dead connection (degraded
+    // startup + phantom tools the model thinks it has). Setting <NAME>_ENDPOINT
+    // auto-enables the server — keeps optional integrations portable across
+    // deployments (a cluster without these services simply omits the env vars).
+    const httpMcpIfConfigured = (
+      name: string,
+      endpointKey: string,
+      apiKeyKey: string,
+    ): Record<
+      string,
+      { type: 'http'; url: string; headers: Record<string, string> }
+    > => {
+      if (!envValue(endpointKey)) return {};
+      return {
+        [name]: {
+          type: 'http',
+          url: endpointValue(endpointKey, ''),
+          headers: { 'X-API-Key': envValue(apiKeyKey) },
+        },
+      };
+    };
+
     q = query({
       prompt: stream,
       options: {
@@ -719,11 +744,11 @@ export class ClaudeEngine implements AgentEngine {
             args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp'],
           },
           // Phase 1 drop-ins
-          vaspilot: {
-            type: 'http',
-            url: endpointValue('VASPILOT_ENDPOINT', 'http://ai-proxy:8933'),
-            headers: { 'X-API-Key': envValue('VASPILOT_API_KEY') },
-          },
+          ...httpMcpIfConfigured(
+            'vaspilot',
+            'VASPILOT_ENDPOINT',
+            'VASPILOT_API_KEY',
+          ),
           mp: {
             // P1.6 audit landed: Docker invocation, image digest-pinned.
             command: 'docker',
@@ -736,16 +761,12 @@ export class ClaudeEngine implements AgentEngine {
               'benedict2002/materials-project-mcp@sha256:b77c75cd6acb34905c940fdd0a732f0cb62d8957d0f9f964d708dad6f5fd49fd',
             ],
           },
-          graphiti: {
-            type: 'http',
-            url: endpointValue('GRAPHITI_ENDPOINT', 'http://ai-proxy:8000'),
-            headers: { 'X-API-Key': envValue('GRAPHITI_API_KEY') },
-          },
-          mem0: {
-            type: 'http',
-            url: endpointValue('MEM0_ENDPOINT', 'http://ai-proxy:7891'),
-            headers: { 'X-API-Key': envValue('MEM0_API_KEY') },
-          },
+          ...httpMcpIfConfigured(
+            'graphiti',
+            'GRAPHITI_ENDPOINT',
+            'GRAPHITI_API_KEY',
+          ),
+          ...httpMcpIfConfigured('mem0', 'MEM0_ENDPOINT', 'MEM0_API_KEY'),
           arxiv: {
             command: 'uvx',
             args: ['arxiv-mcp-server@0.5.0'],
