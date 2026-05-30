@@ -627,7 +627,7 @@ export class ClaudeEngine implements AgentEngine {
     const envValue = (key: string): string => {
       return ctx.sdkEnv[key] ?? process.env[key] ?? '';
     };
-    const endpointValue = (key: string, fallback: string): string => {
+    const endpointValue = (key: string, fallback = ''): string => {
       const raw = envValue(key);
       const endpoint = raw || fallback;
       // These MCP servers use streamable-HTTP (`type: 'http'`), served at an
@@ -669,7 +669,8 @@ export class ClaudeEngine implements AgentEngine {
       return {
         [name]: {
           type: 'http',
-          url: endpointValue(endpointKey, ''),
+          // endpointKey is guaranteed present by the guard above, so no fallback.
+          url: endpointValue(endpointKey),
           headers: { 'X-API-Key': envValue(apiKeyKey) },
         },
       };
