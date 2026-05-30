@@ -651,12 +651,12 @@ export class ClaudeEngine implements AgentEngine {
     };
 
     // Register an optional streamable-HTTP MCP drop-in ONLY when its endpoint is
-    // explicitly configured. Without this guard a deferred/undeployed service
-    // (e.g. mem0 or vaspilot before they ship) falls back to a hard-coded
-    // default host, so every agent run attempts a dead connection (degraded
-    // startup + phantom tools the model thinks it has). Setting <NAME>_ENDPOINT
-    // auto-enables the server — keeps optional integrations portable across
-    // deployments (a cluster without these services simply omits the env vars).
+    // explicitly configured. Without this guard an undeployed service falls back
+    // to a hard-coded default host, so every agent run attempts a dead
+    // connection (degraded startup + phantom tools the model thinks it has).
+    // Setting <NAME>_ENDPOINT auto-enables the server — keeps optional
+    // integrations portable across deployments (a cluster without a given
+    // service simply omits its env vars).
     const httpMcpIfConfigured = (
       name: string,
       endpointKey: string,
@@ -712,10 +712,8 @@ export class ClaudeEngine implements AgentEngine {
           'mcp__matclaw__*',
           'mcp__gmail__*',
           // Phase 1 drop-ins
-          'mcp__vaspilot__*',
           'mcp__mp__*',
           'mcp__graphiti__*',
-          'mcp__mem0__*',
           'mcp__arxiv__*',
           // Phase 2 wrappers
           'mcp__pymatgen_inputset__*',
@@ -744,11 +742,6 @@ export class ClaudeEngine implements AgentEngine {
             args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp'],
           },
           // Phase 1 drop-ins
-          ...httpMcpIfConfigured(
-            'vaspilot',
-            'VASPILOT_ENDPOINT',
-            'VASPILOT_API_KEY',
-          ),
           mp: {
             // P1.6 audit landed: Docker invocation, image digest-pinned.
             command: 'docker',
@@ -766,7 +759,6 @@ export class ClaudeEngine implements AgentEngine {
             'GRAPHITI_ENDPOINT',
             'GRAPHITI_API_KEY',
           ),
-          ...httpMcpIfConfigured('mem0', 'MEM0_ENDPOINT', 'MEM0_API_KEY'),
           arxiv: {
             command: 'uvx',
             args: ['arxiv-mcp-server@0.5.0'],
