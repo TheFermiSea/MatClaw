@@ -66,6 +66,14 @@ function createSchema(database: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_next_run ON scheduled_tasks(next_run);
     CREATE INDEX IF NOT EXISTS idx_status ON scheduled_tasks(status);
 
+    -- task_run_logs is an append-only audit history. It deliberately carries NO
+    -- FOREIGN KEY to scheduled_tasks(id): a run can complete after its task row
+    -- has been deleted/expired (tasks may be removed mid-run during a
+    -- multi-minute agent execution), and the run record must still be writable.
+    -- A FK here caused SQLITE_CONSTRAINT_FOREIGNKEY on the post-run insert,
+    -- surfacing as "Error running task" even though the task itself succeeded.
+    -- deleteTask() still prunes a task's logs when a task is deliberately
+    -- removed. (Existing DBs are migrated to drop the old FK below.)
     CREATE TABLE IF NOT EXISTS task_run_logs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       task_id TEXT NOT NULL,
@@ -73,8 +81,7 @@ function createSchema(database: Database.Database): void {
       duration_ms INTEGER NOT NULL,
       status TEXT NOT NULL,
       result TEXT,
-      error TEXT,
-      FOREIGN KEY (task_id) REFERENCES scheduled_tasks(id)
+      error TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_task_run_logs ON task_run_logs(task_id, run_at);
 
@@ -191,6 +198,54 @@ function createSchema(database: Database.Database): void {
       { err },
       'Could not migrate registered_groups folder uniqueness',
     );
+  }
+
+  // Drop the legacy task_run_logs -> scheduled_tasks(id) FOREIGN KEY.
+  // Audit-log inserts after a task row was deleted/expired (e.g. a task removed
+  // during its own multi-minute run) threw SQLITE_CONSTRAINT_FOREIGNKEY, which
+  // bubbled up as "Error running task" despite the task succeeding. Rebuild the
+  // table without the FK, preserving all existing rows and their ids.
+  try {
+    const row = database
+      .prepare(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'task_run_logs'",
+      )
+      .get() as { sql: string } | undefined;
+
+    if (row?.sql && /FOREIGN KEY/i.test(row.sql)) {
+      database.exec('PRAGMA foreign_keys=off');
+      const migrateTaskRunLogs = database.transaction(() => {
+        database.exec('DROP TABLE IF EXISTS task_run_logs_new');
+        database.exec(`CREATE TABLE task_run_logs_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          task_id TEXT NOT NULL,
+          run_at TEXT NOT NULL,
+          duration_ms INTEGER NOT NULL,
+          status TEXT NOT NULL,
+          result TEXT,
+          error TEXT
+        )`);
+        database.exec(`INSERT INTO task_run_logs_new
+          (id, task_id, run_at, duration_ms, status, result, error)
+          SELECT id, task_id, run_at, duration_ms, status, result, error
+          FROM task_run_logs`);
+        database.exec('DROP TABLE task_run_logs');
+        database.exec('ALTER TABLE task_run_logs_new RENAME TO task_run_logs');
+        database.exec(
+          'CREATE INDEX IF NOT EXISTS idx_task_run_logs ON task_run_logs(task_id, run_at)',
+        );
+      });
+      migrateTaskRunLogs();
+      database.exec('PRAGMA foreign_keys=on');
+      logger.info('Migrated task_run_logs to drop scheduled_tasks FK');
+    }
+  } catch (err) {
+    try {
+      database.exec('PRAGMA foreign_keys=on');
+    } catch {
+      /* ignore pragma reset failure */
+    }
+    logger.warn({ err }, 'Could not migrate task_run_logs to drop FK');
   }
 
   // Add channel and is_group columns if they don't exist (migration for existing DBs)
@@ -615,19 +670,28 @@ export function updateTaskAfterRun(
 }
 
 export function logTaskRun(log: TaskRunLog): void {
-  db.prepare(
-    `
+  // Audit logging must never abort task handling. If the insert fails for any
+  // reason, record a warning and continue — the task itself already ran.
+  try {
+    db.prepare(
+      `
     INSERT INTO task_run_logs (task_id, run_at, duration_ms, status, result, error)
     VALUES (?, ?, ?, ?, ?, ?)
   `,
-  ).run(
-    log.task_id,
-    log.run_at,
-    log.duration_ms,
-    log.status,
-    log.result,
-    log.error,
-  );
+    ).run(
+      log.task_id,
+      log.run_at,
+      log.duration_ms,
+      log.status,
+      log.result,
+      log.error,
+    );
+  } catch (err) {
+    logger.warn(
+      { err, taskId: log.task_id, status: log.status },
+      'logTaskRun: failed to write task_run_log (non-fatal)',
+    );
+  }
 }
 
 // --- Router state accessors ---
