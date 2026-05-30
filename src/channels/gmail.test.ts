@@ -60,12 +60,18 @@ describe('GmailChannel', () => {
       expect(ch.name).toBe('gmail');
     });
 
-    it('defaults to unread query when no filter configured', () => {
+    it('defaults to last-5-min unread query when no filter configured', () => {
       const ch = new GmailChannel(makeOpts());
       const query = (
         ch as unknown as { buildQuery: () => string }
       ).buildQuery();
-      expect(query).toBe('is:unread category:primary');
+      // buildQuery scopes to the last 5 minutes via an `after:<unix-ts>` clause
+      // (avoids reprocessing old unread mail). Assert structure, not the live
+      // timestamp, so the test is neither brittle nor time-flaky.
+      expect(query).toMatch(/^is:unread category:primary after:\d+$/);
+      const after = Number(query.match(/after:(\d+)$/)![1]);
+      const fiveMinAgo = Math.floor((Date.now() - 5 * 60 * 1000) / 1000);
+      expect(Math.abs(after - fiveMinAgo)).toBeLessThan(10);
     });
 
     it('defaults with no options provided', () => {
