@@ -71,10 +71,8 @@ export const CONTAINER_TIMEOUT = parseInt(
   process.env.CONTAINER_TIMEOUT || envConfig.CONTAINER_TIMEOUT || '604800000',
   10,
 );
-export const CONTAINER_MAX_OUTPUT_SIZE = parseInt(
-  process.env.CONTAINER_MAX_OUTPUT_SIZE || '10485760',
-  10,
-); // 10MB default
+export const CONTAINER_MAX_OUTPUT_SIZE =
+  parseInt(process.env.CONTAINER_MAX_OUTPUT_SIZE || '10485760', 10) || 10485760; // 10MB default (guard against a non-numeric env value -> NaN)
 export const IPC_POLL_INTERVAL = 1000;
 export const IDLE_TIMEOUT = parseInt(
   process.env.IDLE_TIMEOUT || envConfig.IDLE_TIMEOUT || '604800000',
