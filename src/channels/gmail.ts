@@ -86,9 +86,14 @@ export class GmailChannel implements Channel {
     this.gmail = google.gmail({ version: 'v1', auth: this.oauth2Client });
 
     // Verify connection
-    const profile = await this.gmail.users.getProfile({ userId: 'me' });
-    this.userEmail = profile.data.emailAddress || '';
-    logger.info({ email: this.userEmail }, 'Gmail channel connected');
+    try {
+      const profile = await this.gmail.users.getProfile({ userId: 'me' });
+      this.userEmail = profile.data.emailAddress || '';
+      logger.info({ email: this.userEmail }, 'Gmail channel connected');
+    } catch (err) {
+      logger.error({ err }, 'Gmail: failed to verify connection (getProfile)');
+      return;
+    }
 
     // Start polling with error backoff
     const schedulePoll = () => {
