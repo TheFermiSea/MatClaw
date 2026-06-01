@@ -1339,8 +1339,12 @@ async function main(): Promise<void> {
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
-    await queue.shutdown(10000);
-    for (const ch of channels) await ch.disconnect();
+    try {
+      await queue.shutdown(10000);
+      for (const ch of channels) await ch.disconnect().catch(() => {});
+    } catch (err) {
+      logger.warn({ err }, 'Error during shutdown');
+    }
     process.exit(0);
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
