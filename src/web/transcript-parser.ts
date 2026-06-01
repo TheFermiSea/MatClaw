@@ -16,6 +16,7 @@ export interface LogEntry {
     | 'result';
   content: string;
   meta?: string; // tool name, tool id, etc.
+  is_error?: boolean; // true when tool_result has is_error flag
 }
 
 interface TranscriptLine {
@@ -35,6 +36,7 @@ interface TranscriptLine {
           input?: unknown;
           tool_use_id?: string;
           content?: string | unknown;
+          is_error?: boolean;
         }>;
   };
   toolUseResult?:
@@ -163,6 +165,7 @@ export function parseTranscript(jsonlContent: string): LogEntry[] {
               type: 'tool-result',
               content: truncate(resultText, 3000),
               meta: block.tool_use_id || undefined,
+              is_error: block.is_error || undefined,
             });
           } else if (block.type === 'text' && block.text) {
             entries.push({

@@ -522,6 +522,14 @@ export function getRecentMessages(
   return rows.reverse();
 }
 
+export function deleteMessage(id: string): void {
+  db.prepare('DELETE FROM messages WHERE id = ?').run(id);
+}
+
+export function markMessageAsBot(id: string): void {
+  db.prepare('UPDATE messages SET is_bot_message = 1 WHERE id = ?').run(id);
+}
+
 export function getMessagesSince(
   chatJid: string,
   sinceTimestamp: string,

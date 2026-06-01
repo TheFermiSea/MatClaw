@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/3dmol@2.4.2/build/3Dmol-min.js"></script>
 <style>
   :root {
     --bg-body: #f0f2f5;
@@ -540,6 +541,20 @@
     border-left-color: var(--green);
     border-color: rgba(16,185,129,0.16);
     background: linear-gradient(135deg, rgba(236,253,245,0.98) 0%, rgba(255,255,255,0.96) 100%);
+  }
+  .entry-tool.has-error {
+    border-left: 5px solid var(--red);
+    border-color: rgba(239,68,68,0.35);
+    background: linear-gradient(135deg, rgba(254,226,226,0.92) 0%, rgba(254,242,242,0.96) 100%);
+    box-shadow: 0 0 0 1px rgba(239,68,68,0.12), 0 10px 28px rgba(239,68,68,0.14);
+  }
+  .entry-tool.has-error .tool-header {
+    background: rgba(254,226,226,0.6);
+    border-bottom-color: rgba(239,68,68,0.18);
+  }
+  .entry-tool.has-error .tool-header .tool-icon {
+    background: rgba(239,68,68,0.16);
+    color: var(--red);
   }
   .viewer.live-mode .entry-tool,
   .viewer.live-mode .live-cmd-card {
@@ -1277,7 +1292,7 @@
     text-transform: uppercase;
   }
   .chat-inline-run {
-    display: none !important;
+    display: none;
   }
   .chat-inline-run-DISABLED {
     display: none;
@@ -1430,57 +1445,7 @@
     overflow: hidden;
   }
   body.workspace-mode .chat-header {
-    align-items: center;
-    padding: 0 2px 2px;
-    gap: 14px;
-  }
-  body.workspace-mode .chat-header-copy {
-    min-width: 0;
-    flex: 1;
-  }
-  body.workspace-mode .chat-brand {
-    gap: 12px;
-    margin-bottom: 0;
-  }
-  body.workspace-mode .chat-brand-mark {
-    width: 50px;
-    height: 50px;
-    border-radius: 16px;
-  }
-  body.workspace-mode .chat-brand-text {
-    gap: 4px;
-    min-width: 0;
-  }
-  body.workspace-mode .chat-kicker {
-    padding: 5px 10px;
-    font-size: 10px;
-  }
-  body.workspace-mode .chat-title {
-    font-size: 18px;
-    line-height: 1.2;
-    letter-spacing: -0.03em;
-  }
-  body.workspace-mode .chat-subtitle {
     display: none;
-  }
-  body.workspace-mode .chat-header {
-    display: none;
-  }
-  body.workspace-mode .chat-status-card {
-    min-width: 260px;
-    max-width: 320px;
-    padding: 12px 14px;
-  }
-  body.workspace-mode .chat-status-label {
-    margin-bottom: 6px;
-  }
-  body.workspace-mode .chat-status-value {
-    font-size: 13px;
-    line-height: 1.4;
-  }
-  body.workspace-mode .chat-status-meta {
-    font-size: 11px;
-    margin-top: 6px;
   }
   body.workspace-mode .chat-inline-run,
   body.workspace-mode .chat-composer {
@@ -1527,13 +1492,72 @@
   body.workspace-mode .workspace-panel-body {
     padding: 8px 12px;
   }
-  body.workspace-mode .workspace-run-list,
-  body.workspace-mode .workspace-artifact-list,
-  body.workspace-mode .workspace-transcript-list {
-    max-height: 180px;
+  body.workspace-mode .workspace-artifact-list {
+    max-height: 480px;
   }
-  body.workspace-mode .workspace-transcript-preview {
-    max-height: 160px;
+  body.workspace-mode .workspace-panel-grow {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  body.workspace-mode .workspace-panel-grow .workspace-panel-body {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .workspace-transcript-mini {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    height: 100%;
+    overflow-y: auto;
+  }
+  .workspace-transcript-mini-entry {
+    font-size: 11px;
+    line-height: 1.5;
+    color: var(--text-secondary);
+    padding: 6px 8px;
+    border-radius: var(--radius);
+    background: var(--bg-input);
+    border-left: 3px solid var(--border);
+  }
+  .workspace-transcript-mini-entry.type-user { border-left-color: var(--accent); }
+  .workspace-transcript-mini-entry.type-assistant { border-left-color: var(--green); }
+  .workspace-transcript-mini-entry.type-tool-call { border-left-color: var(--cyan); }
+  .workspace-transcript-mini-entry.type-tool-result { border-left-color: var(--orange); }
+  .workspace-transcript-mini-entry.type-thinking { border-left-color: var(--orange); opacity: 0.7; }
+  .workspace-transcript-mini-entry.type-error { border-left-color: var(--red); background: rgba(254,226,226,0.5); }
+  .workspace-transcript-mini-entry strong {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+  }
+  .workspace-group-switcher {
+    display: none;
+  }
+  body.workspace-mode .workspace-group-switcher {
+    display: block;
+    margin-bottom: 8px;
+  }
+  .workspace-group-switcher select {
+    width: 100%;
+    padding: 7px 10px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: var(--bg-surface);
+    font-family: var(--font-sans);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary);
+    cursor: pointer;
+    outline: none;
+  }
+  .workspace-group-switcher select:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(99,102,241,0.1);
   }
   .workspace-panel {
     background: rgba(255,255,255,0.88);
@@ -1567,8 +1591,7 @@
     line-height: 1.6;
   }
   .workspace-run-list,
-  .workspace-artifact-list,
-  .workspace-transcript-list {
+  .workspace-artifact-list {
     display: flex;
     flex-direction: column;
     gap: 10px;
@@ -2159,6 +2182,17 @@
     gap: 12px;
     flex-wrap: wrap;
   }
+  .hint-transcript-btn {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 11px; color: var(--text-muted); cursor: pointer;
+    background: none; border: none; padding: 0;
+    font-family: var(--font-sans); transition: color 0.15s;
+  }
+  .hint-transcript-btn:hover { color: var(--accent); }
+  .hint-kbd {
+    font-size: 10px; padding: 1px 5px; border-radius: 4px;
+    background: var(--bg-badge); font-family: var(--font-mono);
+  }
 
   /* Hide sidebar/toolbar/footer in chat and workspace modes */
   body.chat-mode,
@@ -2213,31 +2247,6 @@
     letter-spacing: -0.02em;
   }
   body.chat-mode .chat-subtitle {
-    display: none;
-  }
-  body.chat-mode .chat-status-card {
-    padding: 8px 12px;
-    min-width: 0;
-    border-radius: var(--radius);
-    max-width: 320px;
-  }
-  body.chat-mode .chat-status-label {
-    font-size: 9px;
-    margin-bottom: 3px;
-  }
-  body.chat-mode .chat-status-value {
-    font-size: 12px;
-    gap: 6px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  body.chat-mode .chat-status-dot {
-    width: 7px;
-    height: 7px;
-    flex-shrink: 0;
-  }
-  body.chat-mode .chat-status-meta {
     display: none;
   }
   body.chat-mode .chat-status-card {
@@ -2364,7 +2373,7 @@
   .md-body hr { border: none; border-top: 1px solid var(--border); margin: 4px 0; }
   .md-body strong { font-weight: 600; }
   .md-body em { font-style: italic; }
-  .md-body del { text-decoration: line-through; color: var(--text-muted); }
+  .md-body del { text-decoration: none; color: inherit; }
   .md-body br { display: none; }
 
   /* ── Inline images ── */
@@ -2411,6 +2420,169 @@
   }
   .lightbox-close:hover { background: rgba(255,255,255,0.3); }
 
+  /* ── File Viewer ── */
+  .file-viewer {
+    display: none; position: fixed; inset: 0; z-index: 1000;
+    background: rgba(15,23,42,0.5); backdrop-filter: blur(4px);
+    align-items: center; justify-content: center;
+  }
+  .file-viewer.open { display: flex; }
+  .file-viewer-panel {
+    width: min(860px, 92vw); max-height: 90vh;
+    background: var(--bg-surface); border-radius: var(--radius-xl);
+    box-shadow: 0 24px 60px rgba(15,23,42,0.3);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .file-viewer-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 20px; border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .file-viewer-title {
+    font-size: 14px; font-weight: 700; color: var(--text-primary);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .file-viewer-close {
+    background: none; border: none; cursor: pointer;
+    font-size: 20px; color: var(--text-muted); padding: 4px 8px;
+    border-radius: var(--radius);
+  }
+  .file-viewer-close:hover { color: var(--text-primary); background: var(--bg-surface-hover); }
+  .file-viewer-body {
+    flex: 1; overflow-y: auto; padding: 20px 24px;
+  }
+  .file-viewer-body .md-body { font-size: 14px; line-height: 1.7; }
+  .file-viewer-body pre.raw {
+    margin: 0; font-family: var(--font-mono); font-size: 12px;
+    line-height: 1.6; white-space: pre-wrap; word-break: break-all;
+  }
+  .mol-viewer-wrap {
+    position: relative; width: 100%; height: 520px;
+    border-radius: var(--radius-lg); overflow: hidden;
+    border: 1px solid var(--border); background: #0a0a0a;
+  }
+  .mol-viewer-wrap canvas { border-radius: var(--radius-lg); }
+  .mol-controls {
+    display: flex; gap: 6px; margin-top: 12px; flex-wrap: wrap;
+  }
+  .mol-btn {
+    font-size: 11px; padding: 5px 12px; border-radius: var(--radius);
+    background: var(--bg-surface); color: var(--text-secondary);
+    border: 1px solid var(--border); cursor: pointer;
+    font-family: var(--font-sans); font-weight: 500; transition: all 0.15s;
+  }
+  .mol-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .mol-btn.active { background: var(--accent-light); border-color: var(--accent); color: var(--accent); }
+  .mol-info {
+    margin-top: 10px; font-size: 12px; color: var(--text-muted);
+    font-family: var(--font-mono);
+    color: var(--text-primary);
+  }
+
+  /* ── Inline crystal viewer in chat ── */
+  .chat-crystal-card {
+    margin: 12px 0 4px;
+    border-radius: 16px;
+    overflow: hidden;
+    border: 1px solid rgba(148,163,184,0.18);
+    background: #0f172a;
+    box-shadow: 0 8px 24px rgba(15,23,42,0.12);
+  }
+  .chat-crystal-viewer {
+    width: 100%; height: 300px;
+    position: relative;
+  }
+  .chat-crystal-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 12px;
+    background: rgba(255,255,255,0.95);
+    border-top: 1px solid rgba(148,163,184,0.12);
+    gap: 6px; flex-wrap: wrap;
+  }
+  .chat-crystal-name {
+    font-size: 12px; font-weight: 700; color: var(--text-primary);
+    font-family: var(--font-mono);
+  }
+  .chat-crystal-btns { display: flex; gap: 4px; flex-wrap: wrap; }
+  .chat-crystal-btn {
+    font-size: 10px; padding: 3px 8px; border-radius: 6px;
+    background: var(--bg-input); color: var(--text-secondary);
+    border: 1px solid var(--border); cursor: pointer;
+    font-family: var(--font-sans); font-weight: 600; transition: all 0.15s;
+  }
+  .chat-crystal-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .chat-crystal-btn.active { background: var(--accent-light); border-color: var(--accent); color: var(--accent); }
+
+  /* ── Replay bar ── */
+  .replay-bar {
+    display: none; align-items: center; gap: 10px;
+    padding: 8px 14px;
+    background: linear-gradient(135deg, rgba(99,102,241,0.08) 0%, rgba(16,185,129,0.06) 100%);
+    border: 1px solid rgba(99,102,241,0.18);
+    border-radius: 14px;
+    margin-bottom: 8px;
+  }
+  .replay-bar.active { display: flex; }
+  /* Replay mode: transcript panel fills entire rail, hide artifacts */
+  body.replay-mode .workspace-rail {
+    width: 420px;
+  }
+  body.replay-mode .workspace-shell {
+    grid-template-columns: minmax(0, 1fr) 420px;
+  }
+  body.replay-mode .workspace-panel-grow {
+    flex: 1;
+  }
+  body.replay-mode .workspace-panel:not(.workspace-panel-grow) {
+    display: none;
+  }
+  body.replay-mode .workspace-group-switcher {
+    display: none;
+  }
+  .replay-bar .replay-label {
+    font-size: 11px; font-weight: 700; color: var(--accent);
+    text-transform: uppercase; letter-spacing: 0.06em;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .replay-bar .replay-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--red); animation: pulse 1s infinite;
+  }
+  .replay-bar .replay-progress {
+    flex: 1; font-size: 12px; color: var(--text-secondary);
+    font-family: var(--font-mono);
+  }
+  .replay-bar .replay-btn {
+    font-size: 11px; padding: 4px 12px; border-radius: var(--radius);
+    border: 1px solid var(--border); background: var(--bg-surface);
+    color: var(--text-secondary); cursor: pointer; font-weight: 600;
+    font-family: var(--font-sans);
+  }
+  .replay-bar .replay-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .replay-speed {
+    font-size: 11px; padding: 4px 8px; border-radius: var(--radius);
+    border: 1px solid var(--border); background: var(--bg-surface);
+    font-family: var(--font-mono); color: var(--text-secondary);
+    cursor: pointer; min-width: 42px; text-align: center;
+  }
+
+  /* ── Chat context menu ── */
+  .chat-ctx-menu {
+    position: fixed; z-index: 950; display: none;
+    background: var(--bg-surface); border: 1px solid var(--border);
+    border-radius: var(--radius); box-shadow: var(--shadow-lg);
+    padding: 4px 0; min-width: 140px;
+  }
+  .chat-ctx-menu.open { display: block; }
+  .chat-ctx-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 14px; font-size: 12px; font-weight: 500;
+    color: var(--text-secondary); cursor: pointer;
+    font-family: var(--font-sans); transition: all 0.1s;
+  }
+  .chat-ctx-item:hover { background: var(--bg-surface-hover); color: var(--text-primary); }
+  .chat-ctx-item.danger:hover { background: var(--red-light); color: var(--red); }
+
   /* Scrollbar */
   ::-webkit-scrollbar { width: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
@@ -2428,6 +2600,9 @@
     <div class="ws-badge" id="ws-badge">
       <div class="ws-dot" id="ws-dot"></div>
       <span id="ws-label">Connecting</span>
+    </div>
+    <div class="ws-badge" id="mode-badge" style="cursor:default;">
+      <span id="mode-label">Compute</span>
     </div>
   </div>
   <div class="header-right">
@@ -2458,7 +2633,7 @@
     <div class="sb-history" id="history"></div>
     <div class="chat-sidebar" id="chat-sidebar">
       <div class="chat-sidebar-header">
-        <div class="chat-sidebar-title">Saved Sessions</div>
+        <div class="chat-sidebar-title" id="chat-sidebar-title">Saved Sessions</div>
         <input class="chat-session-search" id="chat-session-search" type="search" placeholder="Search sessions..." oninput="setChatSessionSearch(this.value)">
         <button class="chat-session-new" type="button" onclick="createChatSession()">New chat</button>
       </div>
@@ -2515,6 +2690,18 @@
                 </div>
               </div>
             </div>
+            <div class="replay-bar" id="replay-bar">
+              <div class="replay-label"><span class="replay-dot"></span> REPLAY</div>
+              <div class="replay-progress" id="replay-progress">0 / 0</div>
+              <select class="replay-speed" id="replay-speed" title="Speed">
+                <option value="2000">Slow</option>
+                <option value="800" selected>Normal</option>
+                <option value="300">Fast</option>
+                <option value="0">Instant</option>
+              </select>
+              <button class="replay-btn" onclick="toggleReplayPause()">Pause</button>
+              <button class="replay-btn" onclick="stopReplay()">Stop</button>
+            </div>
             <div class="chat-composer">
               <div class="chat-drag-overlay" id="chat-drag-overlay">Drop files anywhere in the chat to attach them</div>
               <div class="chat-composer-top">
@@ -2540,18 +2727,23 @@
               </div>
               <div class="chat-input-hint">
                 <span>Markdown replies render inline.</span>
-                <span>Images open in the same lightbox viewer.</span>
+                <button class="hint-transcript-btn" onclick="openLatestTranscript()" title="View latest transcript (Ctrl+Shift+T)">&#128196; Transcripts <span class="hint-kbd">&#8984;&#8679;T</span></button>
               </div>
             </div>
           </div>
           <aside class="workspace-rail">
-            <div class="workspace-panel">
+            <div class="workspace-group-switcher">
+              <select id="workspace-group-select" onchange="switchWorkspaceGroup(this.value)"></select>
+            </div>
+            <div class="workspace-panel workspace-panel-grow">
               <div class="workspace-panel-head">
-                <div class="workspace-panel-title">Run Activity</div>
-                <button class="workspace-transcript-open" type="button" onclick="openLiveFromWorkspace()">Open Live</button>
+                <div class="workspace-panel-title">Transcript</div>
+                <button class="workspace-transcript-open" type="button" onclick="openLatestTranscript()">Full View</button>
               </div>
               <div class="workspace-panel-body">
-                <div class="workspace-run-list" id="workspace-run-list"></div>
+                <div class="workspace-transcript-mini" id="workspace-transcript-mini">
+                  <div class="workspace-empty">Transcript for this conversation will appear here once the agent runs.</div>
+                </div>
               </div>
             </div>
             <div class="workspace-panel">
@@ -2561,16 +2753,6 @@
               </div>
               <div class="workspace-panel-body">
                 <div class="workspace-artifact-list" id="workspace-artifact-list"></div>
-              </div>
-            </div>
-            <div class="workspace-panel">
-              <div class="workspace-panel-head">
-                <div class="workspace-panel-title">Recent Transcripts</div>
-                <button class="workspace-transcript-open" type="button" onclick="switchTab('transcripts')">Open Tab</button>
-              </div>
-              <div class="workspace-panel-body">
-                <div class="workspace-transcript-list" id="workspace-transcript-list"></div>
-                <div class="workspace-transcript-preview" id="workspace-transcript-preview"></div>
               </div>
             </div>
           </aside>
@@ -2594,6 +2776,21 @@
   <img id="lightbox-img" src="" alt="">
 </div>
 
+<div class="chat-ctx-menu" id="chat-ctx-menu">
+  <div class="chat-ctx-item" onclick="copyChatMessage()">Copy text</div>
+  <div class="chat-ctx-item danger" onclick="deleteChatRow()">Delete</div>
+</div>
+
+<div class="file-viewer" id="file-viewer" onclick="if(event.target===this)closeFileViewer()">
+  <div class="file-viewer-panel">
+    <div class="file-viewer-head">
+      <span class="file-viewer-title" id="file-viewer-title"></span>
+      <button class="file-viewer-close" onclick="closeFileViewer()">&times;</button>
+    </div>
+    <div class="file-viewer-body" id="file-viewer-body"></div>
+  </div>
+</div>
+
 <script>
 const V = document.getElementById('viewer');
 const E = document.getElementById('empty');
@@ -2611,6 +2808,7 @@ try {
 }
 let chatRunItems = [];
 let chatRunStatus = 'Idle';
+let agentRunningForWebChat = false; // true while agent is active
 let chatArtifacts = { conversation: [], workspace: [] };
 let workspaceTranscripts = [];
 let selectedWorkspaceTranscript = null;
@@ -2644,12 +2842,57 @@ function connect() {
       return;
     }
 
-    // Agent start/end for web_chat — toggle thinking indicator
+    // Agent start/end for web_chat — toggle thinking indicator + live transcript
     if (data.type === 'agent:start' && data.groupFolder === 'web_chat') {
+      agentRunningForWebChat = true;
       d('chat-thinking').classList.add('show');
+      const panel = d('workspace-transcript-mini');
+      if (panel) {
+        panel.innerHTML = '';
+        liveTranscriptAppend('system', data.timestamp?.slice(11,23) || '', 'Agent started');
+      }
     }
     if (data.type === 'agent:end' && data.groupFolder === 'web_chat') {
+      agentRunningForWebChat = false;
       d('chat-thinking').classList.remove('show');
+      liveTranscriptAppend('system', data.timestamp?.slice(11,23) || '', 'Agent finished');
+      loadWorkspaceTranscriptMini().catch(() => {});
+    }
+    // Live transcript updates for web_chat
+    if ((data.type === 'agent:stdout' || data.type === 'agent:stderr') && data.groupFolder === 'web_chat') {
+      // Recover from page refresh — if we get output but missed agent:start
+      if (!agentRunningForWebChat) {
+        agentRunningForWebChat = true;
+        d('chat-thinking').classList.add('show');
+        const panel = d('workspace-transcript-mini');
+        if (panel && panel.querySelector('.workspace-empty')) panel.innerHTML = '';
+        liveTranscriptAppend('system', data.timestamp?.slice(11,23) || '', 'Agent running (reconnected)');
+      }
+      for (const line of String(data.data?.chunk || '').split('\n')) {
+        const clean = line.trim().replace(/^\[stderr\]\s*/, '').replace(/^(INFO|DEBUG|WARN|ERROR)\s+/, '').trim();
+        if (!clean || clean.length < 3) continue;
+        if (/^(INFO|DEBUG|WARN|ERROR|TRACE|FATAL)$/.test(clean)) continue;
+        const ts = data.timestamp?.slice(11, 23) || '';
+        const thinking = clean.match(/^\[Thinking\]\s*(.*)/s);
+        if (thinking) { liveTranscriptAppend('thinking', ts, thinking[1].slice(0, 200)); continue; }
+        const toolCall = clean.match(/^\[ToolCall\]\s+(\S+)/);
+        if (toolCall) { liveTranscriptAppend('tool-call', ts, toolCall[1]); continue; }
+        const toolInput = clean.match(/^\[ToolInput\]/);
+        if (toolInput) { liveTranscriptAppend('tool-call', ts, clean.slice(0, 200)); continue; }
+        const toolResult = clean.match(/^\[ToolResult\]/);
+        if (toolResult) { liveTranscriptAppend('tool-result', ts, clean.slice(0, 200)); continue; }
+        const assistant = clean.match(/^\[Assistant\]\s*(.*)/s);
+        if (assistant) { liveTranscriptAppend('assistant', ts, assistant[1].slice(0, 200)); continue; }
+        // Show other significant lines (engine events, progress, etc.)
+        if (/Creating engine|Starting query|Got new message|Query ended/.test(clean)) {
+          liveTranscriptAppend('system', ts, clean); continue;
+        }
+      }
+    }
+    // Update mode badge when /mode command changes mode
+    if (data.type === 'status' && data.data?.mode) {
+      d('mode-label').textContent = data.data.label || data.data.mode;
+      return;
     }
 
     // Always process agent events so they accumulate in the viewer
@@ -2706,10 +2949,12 @@ function handleEvent(ev) {
       break;
 
     case 'agent:output':
+      // Skip session-update markers (result: null) — they are internal bookkeeping
+      if (!ev.data.result) break;
       hideEmpty();
       flushPendingCmd();
-      addResult(ts, ev.data.result ? String(ev.data.result).slice(0, 4000) : '(empty)');
-      if (ev.groupFolder === 'web_chat' && ev.data.result) {
+      addResult(ts, String(ev.data.result).slice(0, 4000));
+      if (ev.groupFolder === 'web_chat') {
         appendChatRunItem('result', 'Result', String(ev.data.result).slice(0, 240), ts);
       }
       break;
@@ -2722,7 +2967,7 @@ function handleEvent(ev) {
         chatRunStatus = exitCode === 0 ? 'Completed' : 'Failed';
         renderChatRun();
         loadChatArtifacts(currentChatThreadId).catch(() => {});
-        loadWorkspaceTranscripts().catch(() => {});
+        loadWorkspaceTranscriptMini().catch(() => {});
       }
       const s = ev.data.duration ? Math.round(Number(ev.data.duration)/1000)+'s' : '?';
       const code = ev.data.exitCode;
@@ -2825,7 +3070,7 @@ function parseLiveLine(line, ts) {
     return;
   }
 
-  // [msg #N] type=X → Message boundary (suppress, just noise)
+  // [msg #N] type=X → Message boundary (suppress individual SDK messages)
   if (content.match(/^\[msg #\d+\]\s*type=/)) {
     return;
   }
@@ -2891,12 +3136,20 @@ function parseLiveLine(line, ts) {
     return;
   }
 
+  // IPC follow-up: new message piped to active container → show divider
+  if (content.match(/^Got new message\b/)) {
+    flushUnstructured();
+    flushPendingCmd();
+    addDivider('New Turn \u2022 Follow-up Message');
+    return;
+  }
+
   // Engine creation / auth / session lines
   if (content.match(/^(Creating engine|Engine ready|Using .+ authentication|Starting query)/)) {
     addLiveEvent(lineTs, 'engine', content);
     return;
   }
-  if (content.match(/^(Codex thread started|Session resumed|Received input|Got new message|Query ended|Close sentinel|Draining|Refreshed)/)) {
+  if (content.match(/^(Codex thread started|Session resumed|Received input|Query ended|Close sentinel|Draining|Refreshed)/)) {
     addLiveEvent(lineTs, 'info', content);
     return;
   }
@@ -2951,8 +3204,7 @@ function flushUnstructured() {
       preview.style.maxHeight = preview.style.maxHeight === 'none' ? '3.6em' : 'none';
     });
     el.appendChild(preview);
-    liveEl.appendChild(el);
-    autoScroll();
+    append(el);
   }
 }
 
@@ -3083,6 +3335,15 @@ function trackChatRunLine(line, ts) {
   const content = String(line || '').replace(/^\[stderr\]\s*/, '').replace(/^(INFO|DEBUG|WARN|ERROR)\s+/, '').trim();
   if (!content) return;
 
+  // New IPC turn: reset run items and re-show thinking indicator
+  if (content.match(/^Got new message\b/)) {
+    chatRunItems = [];
+    chatRunStatus = 'Running';
+    renderChatRun();
+    d('chat-thinking').classList.add('show');
+    return;
+  }
+
   const thinkingMatch = content.match(/^\[Thinking\]\s*(.*)/s);
   if (thinkingMatch) {
     appendChatRunItem('thinking', 'Thinking', thinkingMatch[1].slice(0, 200), ts);
@@ -3200,6 +3461,12 @@ try {
       breaks: false,
       gfm: true,
       renderer: {
+        // Disable ~~strikethrough~~ rendering — agent output often contains ~~
+        // in paths, separators, and code that gets misinterpreted as <del> tags.
+        del(text) {
+          const t = typeof text === 'object' ? text.text || '' : text;
+          return '~~' + t + '~~';
+        },
         // marked v12: image(href, title, text)
         image(href, title, text) {
           const g = activeGroup || selGroup;
@@ -3467,10 +3734,11 @@ function addToolResult(ts, toolId, content, isError) {
       status.className = `tool-status ${isError ? 'err' : 'ok'}`;
       status.textContent = isError ? 'Error' : 'Done';
     }
+    if (isError) card.classList.add('has-error');
     card.appendChild(wrap);
   } else {
     const el = document.createElement('div');
-    el.className = 'entry-tool entry-animate';
+    el.className = `entry-tool entry-animate${isError ? ' has-error' : ''}`;
     el.dataset.toolKind = isError ? 'tool' : 'read';
     el.innerHTML =
       `<div class="tool-header">` +
@@ -3483,7 +3751,11 @@ function addToolResult(ts, toolId, content, isError) {
     append(el);
   }
 
-  entries++; d('st-entries').textContent = entries;
+  // Only increment for the card-found branch; the else branch already
+  // incremented via append().
+  if (card) {
+    entries++; d('st-entries').textContent = entries;
+  }
   if (autoScroll) V.scrollTop = V.scrollHeight;
 }
 
@@ -3535,9 +3807,11 @@ async function loadTranscript(group, file) {
         addToolCall(e.time, name, id, e.content);
         break;
       }
-      case 'tool-result':
-        addToolResult(e.time, e.meta || pendingToolId || '', e.content, false);
+      case 'tool-result': {
+        const isErr = e.is_error || /\b(?:error|exception|traceback|failed|failure)\b/i.test(e.content);
+        addToolResult(e.time, e.meta || pendingToolId || '', e.content, isErr);
         break;
+      }
       case 'result': addResult(e.time, e.content); break;
       case 'system': addSystem(e.time, e.content); break;
     }
@@ -3633,9 +3907,12 @@ function switchTab(t) {
     scrollChatEnd();
   }
   if (t === 'workspace') {
+    loadWorkspaceGroupSelector().catch(() => {});
     loadChatArtifacts(currentChatThreadId).catch(() => {});
-    loadWorkspaceTranscripts().catch(() => {});
-    renderChatRun();
+    loadWorkspaceTranscriptMini().catch(() => {});
+    startTranscriptPoll();
+  } else {
+    stopTranscriptPoll();
   }
   if (selGroup) loadHistory(selGroup);
 }
@@ -3654,6 +3931,9 @@ function clearViewer() {
   V.innerHTML = ''; entries = 0; d('st-entries').textContent = '0';
   E.style.display = ''; V.appendChild(E);
   pendingCmd = null; outputLines = [];
+  pendingToolCallEl = null; pendingToolId = null;
+  if (_unstructuredTimer) clearTimeout(_unstructuredTimer);
+  _unstructuredTimer = null; _unstructuredBuf = [];
 }
 
 function applyFilter() {
@@ -3673,12 +3953,13 @@ V.addEventListener('scroll', () => {
 });
 
 function enc(s) { return encodeURIComponent(s); }
-function buildWebChatFileUrl(filePath) {
+function buildWebChatFileUrl(filePath, group) {
   const raw = String(filePath || '').trim();
   if (!raw) return '';
   if (/^(https?:|data:|blob:)/i.test(raw)) return raw;
   const clean = raw.replace(/[?#].*$/, '');
-  return `/api/file?group=web_chat&path=${enc(clean)}`;
+  const g = group || workspaceGroup || 'web_chat';
+  return `/api/file?group=${enc(g)}&path=${enc(clean)}`;
 }
 
 function openImage(src) {
@@ -3689,7 +3970,765 @@ function closeLightbox() {
   d('lightbox').classList.remove('open');
   d('lightbox-img').src = '';
 }
-document.addEventListener('keydown', e => { if (e.key === 'Escape') closeLightbox(); });
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    if (d('file-viewer').classList.contains('open')) { closeFileViewer(); return; }
+    closeLightbox();
+  }
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'T') {
+    e.preventDefault();
+    openLatestTranscript();
+  }
+});
+
+const viewableExts = new Set(['.md', '.txt', '.py', '.json', '.yaml', '.yml', '.sh', '.csv', '.tsv', '.js', '.ts', '.html', '.log', '.xyz', '.cif', '.pdb', '.sdf', '.mol2', '.cube', '.traj']);
+
+function closeFileViewer() {
+  d('file-viewer').classList.remove('open');
+  d('file-viewer-body').innerHTML = '';
+}
+
+async function openFileViewer(url, filename) {
+  d('file-viewer-title').textContent = filename;
+  d('file-viewer-body').innerHTML = '<div style="color:var(--text-muted)">Loading...</div>';
+  d('file-viewer').classList.add('open');
+  try {
+    const resp = await fetch(url);
+    const text = await resp.text();
+    const ext = (filename.match(/\.[^.]+$/) || [''])[0].toLowerCase();
+    const body = d('file-viewer-body');
+    if (ext === '.html') {
+      // HTML files: open in new tab instead of viewer
+      closeFileViewer();
+      window.open(url, '_blank', 'noopener');
+      return;
+    } else if (crystalExts.has(ext)) {
+      renderMolViewer(body, text, ext, filename);
+    } else if (ext === '.md') {
+      body.innerHTML = '<div class="md-body">' + renderText(text, 'web_chat') + '</div>';
+      enhanceMarkdown(body.querySelector('.md-body'));
+    } else {
+      body.innerHTML = '';
+      const pre = document.createElement('pre');
+      pre.className = 'raw';
+      pre.textContent = text;
+      body.appendChild(pre);
+    }
+  } catch {
+    d('file-viewer-body').innerHTML = '<div style="color:var(--red)">Failed to load file.</div>';
+  }
+}
+
+// ── 3D Crystal Structure Viewer ──
+const crystalExts = new Set(['.xyz', '.cif', '.pdb', '.sdf', '.mol2', '.cube', '.traj']);
+
+function countXyzFrames(data) {
+  // XYZ format: first line is atom count, frames are separated by atom-count lines
+  const lines = data.trim().split('\n');
+  if (!lines.length) return 0;
+  const firstAtomCount = parseInt(lines[0]);
+  if (!firstAtomCount || firstAtomCount < 1) return 1;
+  const linesPerFrame = firstAtomCount + 2; // atom count + comment + atoms
+  return Math.floor(lines.length / linesPerFrame);
+}
+
+function detectMolFormat(ext) {
+  const map = { '.xyz': 'xyz', '.cif': 'cif', '.pdb': 'pdb', '.sdf': 'sdf', '.mol2': 'mol2', '.cube': 'cube', '.traj': 'xyz' };
+  return map[ext] || 'xyz';
+}
+
+function countAtoms(text, ext) {
+  if (ext === '.xyz') {
+    const first = text.trim().split('\n')[0]?.trim();
+    return parseInt(first) || '?';
+  }
+  return null;
+}
+
+function renderMolViewer(container, data, ext, filename) {
+  container.innerHTML = '';
+
+  const format = detectMolFormat(ext);
+  const atomCount = countAtoms(data, ext);
+
+  // Viewer container
+  const wrap = document.createElement('div');
+  wrap.className = 'mol-viewer-wrap';
+  wrap.id = 'mol-viewer-' + Date.now();
+  container.appendChild(wrap);
+
+  // Controls
+  const controls = document.createElement('div');
+  controls.className = 'mol-controls';
+  container.appendChild(controls);
+
+  // Info
+  if (atomCount) {
+    const info = document.createElement('div');
+    info.className = 'mol-info';
+    info.textContent = `${filename} · ${atomCount} atoms · ${format.toUpperCase()}`;
+    container.appendChild(info);
+  }
+
+  // Initialize 3Dmol viewer
+  if (typeof $3Dmol === 'undefined') {
+    container.innerHTML = '<div style="color:var(--red)">3Dmol.js not loaded. Check network connection.</div>';
+    return;
+  }
+
+  const viewer = $3Dmol.createViewer(wrap, {
+    backgroundColor: '#0f172a',
+    antialias: true,
+  });
+
+  // Detect multi-frame XYZ
+  const isMultiFrame = format === 'xyz' && countXyzFrames(data) > 1;
+  const numFrames = isMultiFrame ? countXyzFrames(data) : 1;
+
+  if (isMultiFrame) {
+    viewer.addModelsAsFrames(data, format);
+  } else {
+    viewer.addModel(data, format);
+  }
+  const model = viewer.getModel();
+
+  // Default style: ball and stick
+  let currentStyle = 'stick';
+  const applyStyle = (style) => {
+    currentStyle = style;
+    viewer.setStyle({}, {});
+    switch (style) {
+      case 'stick':
+        viewer.setStyle({}, { stick: { radius: 0.15 }, sphere: { scale: 0.25 } });
+        break;
+      case 'sphere':
+        viewer.setStyle({}, { sphere: { scale: 1.0 } });
+        break;
+      case 'line':
+        viewer.setStyle({}, { line: { linewidth: 2 } });
+        break;
+      case 'cartoon':
+        viewer.setStyle({}, { cartoon: {}, stick: { radius: 0.1 } });
+        break;
+    }
+    viewer.render();
+    controls.querySelectorAll('.mol-btn[data-style]').forEach(b =>
+      b.classList.toggle('active', b.dataset.style === style));
+  };
+
+  // Style buttons
+  const styles = [
+    { key: 'stick', label: 'Ball & Stick' },
+    { key: 'sphere', label: 'Spacefill' },
+    { key: 'line', label: 'Wireframe' },
+  ];
+  for (const s of styles) {
+    const btn = document.createElement('button');
+    btn.className = `mol-btn${s.key === 'stick' ? ' active' : ''}`;
+    btn.dataset.style = s.key;
+    btn.textContent = s.label;
+    btn.onclick = () => applyStyle(s.key);
+    controls.appendChild(btn);
+  }
+
+  // Unit cell button (for CIF files)
+  if (ext === '.cif') {
+    const cellBtn = document.createElement('button');
+    cellBtn.className = 'mol-btn';
+    cellBtn.textContent = 'Unit Cell';
+    let cellOn = false;
+    cellBtn.onclick = () => {
+      cellOn = !cellOn;
+      cellBtn.classList.toggle('active', cellOn);
+      if (cellOn) {
+        viewer.addUnitCell(model, { box: { color: 'white' }, alabel: '', blabel: '', clabel: '' });
+      } else {
+        viewer.removeUnitCell(model);
+      }
+      viewer.render();
+    };
+    controls.appendChild(cellBtn);
+  }
+
+  // Spin toggle
+  const spinBtn = document.createElement('button');
+  spinBtn.className = 'mol-btn active';
+  spinBtn.textContent = 'Spin';
+  let spinning = true;
+  spinBtn.onclick = () => {
+    spinning = !spinning;
+    spinBtn.classList.toggle('active', spinning);
+    viewer.spin(spinning ? 'y' : false);
+  };
+  controls.appendChild(spinBtn);
+
+  // Reset view
+  const resetBtn = document.createElement('button');
+  resetBtn.className = 'mol-btn';
+  resetBtn.textContent = 'Reset View';
+  resetBtn.onclick = () => { viewer.zoomTo(); viewer.render(); };
+  controls.appendChild(resetBtn);
+
+  // Multi-frame animation controls
+  if (isMultiFrame) {
+    const sep = document.createElement('span');
+    sep.style.cssText = 'width:1px;height:20px;background:var(--border);margin:0 4px';
+    controls.appendChild(sep);
+
+    const playBtn = document.createElement('button');
+    playBtn.className = 'mol-btn active';
+    playBtn.textContent = `▶ Animate (${numFrames} frames)`;
+    let animating = true;
+    viewer.animate({ loop: 'forward', reps: 0, interval: 80 });
+    playBtn.onclick = () => {
+      animating = !animating;
+      playBtn.classList.toggle('active', animating);
+      if (animating) {
+        viewer.animate({ loop: 'forward', reps: 0, interval: 80 });
+        playBtn.textContent = `▶ Animate (${numFrames} frames)`;
+      } else {
+        viewer.stopAnimate();
+        playBtn.textContent = `⏸ Paused`;
+      }
+    };
+    controls.appendChild(playBtn);
+
+    // Update info
+    if (atomCount) {
+      const infoEl = container.querySelector('.mol-info');
+      if (infoEl) infoEl.textContent = `${filename} · ${atomCount} atoms · ${numFrames} frames · ${format.toUpperCase()} trajectory`;
+    }
+  }
+
+  // Render
+  applyStyle('stick');
+  viewer.zoomTo();
+  if (!isMultiFrame) viewer.spin('y');
+  viewer.render();
+}
+
+// ── Inline crystal viewers in chat bubbles ──
+const crystalFileRe = /\b([\w.\/\-]+\.(?:xyz|cif|pdb|sdf|mol2|traj))\b/gi;
+const renderedCrystalFiles = new Set(); // track already-rendered files to avoid duplicates
+
+function embedCrystalViewers(bubble, rawText) {
+  if (typeof $3Dmol === 'undefined') return;
+  const matches = new Set();
+  for (const m of rawText.matchAll(crystalFileRe)) {
+    const name = m[1];
+    if (/^\d/.test(name) || name.includes('://')) continue;
+    const basename = name.split('/').pop();
+    if (renderedCrystalFiles.has(basename)) continue;
+    matches.add(name);
+  }
+  if (!matches.size) return;
+
+  for (const filename of matches) {
+    const basename = filename.split('/').pop();
+    renderedCrystalFiles.add(basename);
+    const card = document.createElement('div');
+    card.className = 'chat-crystal-card';
+    bubble.appendChild(card);
+    lazyLoadCrystalViewer(card, filename, workspaceGroup || 'web_chat');
+  }
+}
+
+async function lazyLoadCrystalViewer(card, filename, group) {
+  const basename = filename.split('/').pop();
+  const viewerId = 'cv-' + Math.random().toString(36).slice(2, 8);
+  card.innerHTML =
+    `<div class="chat-crystal-viewer" id="${viewerId}"></div>` +
+    `<div class="chat-crystal-bar">` +
+      `<span class="chat-crystal-name">${esc(basename)}</span>` +
+      `<div class="chat-crystal-btns">` +
+        `<button class="chat-crystal-btn active" data-s="stick">Ball&Stick</button>` +
+        `<button class="chat-crystal-btn" data-s="sphere">Spacefill</button>` +
+        `<button class="chat-crystal-btn active" data-s="spin">Spin</button>` +
+      `</div>` +
+    `</div>`;
+
+  const url = buildWebChatFileUrl(filename, group);
+  const ext = (filename.match(/\.[^.]+$/) || ['.xyz'])[0].toLowerCase();
+  try {
+    const r = await fetch(url);
+    if (!r.ok) throw 0;
+    const data = await r.text();
+    if (!data || data.length < 10 || data.startsWith('File not found') || data.startsWith('Failed')) { card.remove(); return; }
+
+    const container = d(viewerId);
+    if (!container) return;
+    const viewer = $3Dmol.createViewer(container, { backgroundColor: '#0f172a', antialias: true });
+    const fmt = detectMolFormat(ext);
+    const multi = fmt === 'xyz' && countXyzFrames(data) > 1;
+    if (multi) viewer.addModelsAsFrames(data, 'xyz'); else viewer.addModel(data, fmt);
+    viewer.setStyle({}, { stick: { radius: 0.15 }, sphere: { scale: 0.25 } });
+    viewer.zoomTo();
+    if (multi) {
+      viewer.animate({ loop: 'forward', reps: 0, interval: 80 });
+      const n = card.querySelector('.chat-crystal-name');
+      if (n) n.textContent += ` (${countXyzFrames(data)} frames)`;
+      const s = card.querySelector('[data-s="spin"]');
+      if (s) { s.dataset.s = 'animate'; s.textContent = '⏸ Pause'; }
+    } else { viewer.spin('y'); }
+    viewer.render();
+
+    let spinning = !multi, animating = multi;
+    card.querySelectorAll('.chat-crystal-btn').forEach(btn => {
+      btn.onclick = () => {
+        const s = btn.dataset.s;
+        if (s === 'spin') { spinning = !spinning; btn.classList.toggle('active', spinning); viewer.spin(spinning ? 'y' : false); return; }
+        if (s === 'animate') { animating = !animating; btn.classList.toggle('active', animating); if (animating) { viewer.animate({ loop: 'forward', reps: 0, interval: 80 }); btn.textContent = '⏸ Pause'; } else { viewer.stopAnimate(); btn.textContent = '▶ Play'; } return; }
+        card.querySelectorAll('[data-s="stick"],[data-s="sphere"]').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active'); viewer.setStyle({}, {});
+        if (s === 'stick') viewer.setStyle({}, { stick: { radius: 0.15 }, sphere: { scale: 0.25 } });
+        else viewer.setStyle({}, { sphere: { scale: 1.0 } });
+        viewer.render();
+      };
+    });
+  } catch { card.remove(); }
+}
+
+async function openLatestTranscript() {
+  try {
+    const session = chatSessions.find(s => s.id === currentChatThreadId);
+    const sid = session?.agent_session_id;
+
+    const transcripts = await (await fetch('/api/transcripts?group=web_chat')).json();
+    if (!transcripts.length) return;
+
+    let target = null;
+    // 1. Exact match: transcript file starts with this thread's session ID
+    if (sid) {
+      // Support comma-separated session IDs — find the latest matching transcript
+      const sids = sid.split(',').filter(Boolean);
+      for (const s of sids.reverse()) {
+        target = transcripts.find(t => t.file.startsWith(s));
+        if (target) break;
+      }
+    }
+    // 2. Time-based match: find transcript modified closest to (but after) thread creation
+    if (!target && session) {
+      const threadTime = new Date(session.updated_at || session.created_at).getTime();
+      let bestDiff = Infinity;
+      for (const t of transcripts) {
+        const tTime = new Date(t.modified).getTime();
+        const diff = Math.abs(tTime - threadTime);
+        if (diff < bestDiff) { bestDiff = diff; target = t; }
+      }
+    }
+    if (!target) target = transcripts[0];
+
+    selectGroup('web_chat');
+    switchTab('transcripts');
+    loadTranscript('web_chat', target.file);
+  } catch {}
+}
+
+// ── Workspace transcript mini-panel ──
+let detectedStructureFiles = []; // crystal files found in transcript
+
+// Transcript display name mapping (stored in localStorage)
+let transcriptNames = {};
+try { transcriptNames = JSON.parse(localStorage.getItem('matclaw.transcript.names') || '{}'); } catch { transcriptNames = {}; }
+function getTranscriptDisplayName(group, file) {
+  return transcriptNames[`${group}:${file}`] || null;
+}
+function setTranscriptDisplayName(group, file, name) {
+  if (name) transcriptNames[`${group}:${file}`] = name;
+  else delete transcriptNames[`${group}:${file}`];
+  localStorage.setItem('matclaw.transcript.names', JSON.stringify(transcriptNames));
+}
+
+// ── Live transcript polling ──
+let transcriptPollTimer = null;
+let transcriptPollLastCount = 0;
+let transcriptPollFile = null;
+
+function startTranscriptPoll() {
+  stopTranscriptPoll();
+  transcriptPollTimer = setInterval(pollTranscriptUpdates, 3000);
+}
+
+function stopTranscriptPoll() {
+  if (transcriptPollTimer) clearInterval(transcriptPollTimer);
+  transcriptPollTimer = null;
+}
+
+async function pollTranscriptUpdates() {
+  if (tab !== 'workspace' && tab !== 'chat') return;
+  let sid = findTranscriptForThread();
+
+  // If no session ID yet (new conversation), try to find the latest transcript
+  if (!sid) {
+    try {
+      const transcripts = await (await fetch('/api/transcripts?group=web_chat')).json();
+      if (transcripts.length) sid = transcripts[0].file.replace('.jsonl', '');
+    } catch {}
+  }
+  if (!sid) return;
+  const file = sid + '.jsonl';
+
+  try {
+    const entries = await (await fetch(`/api/transcript/json?group=web_chat&file=${enc(file)}`)).json();
+    if (!entries.length) return;
+
+    // First poll or file changed — just set baseline
+    if (file !== transcriptPollFile) {
+      transcriptPollFile = file;
+      transcriptPollLastCount = entries.length;
+      return;
+    }
+
+    // No new entries
+    if (entries.length <= transcriptPollLastCount) return;
+
+    // Append only the new entries
+    const newEntries = entries.slice(transcriptPollLastCount);
+    transcriptPollLastCount = entries.length;
+
+    for (const e of newEntries) {
+      liveTranscriptAppend(e.type, e.time || '', String(e.content || '').slice(0, 200));
+    }
+  } catch {}
+}
+
+function liveTranscriptAppend(type, ts, content) {
+  const panel = d('workspace-transcript-mini');
+  if (!panel) return;
+  const row = document.createElement('div');
+  const typeClass = `type-${type}`;
+  row.className = `workspace-transcript-mini-entry ${typeClass}`;
+  row.innerHTML = `<strong>${esc(type)}</strong> ${esc(ts)}<br>${esc(String(content).slice(0, 200))}`;
+  panel.appendChild(row);
+  // Keep max 200 entries to avoid memory issues
+  while (panel.children.length > 200) panel.removeChild(panel.firstChild);
+  panel.scrollTop = panel.scrollHeight;
+}
+
+function findTranscriptForThread() {
+  const session = chatSessions.find(s => s.id === currentChatThreadId);
+  const sid = session?.agent_session_id || null;
+  if (!sid) return null;
+  // Return the last (most recent) session ID
+  const sids = sid.split(',').filter(Boolean);
+  return sids[sids.length - 1] || null;
+}
+
+function extractStructureFiles(entries) {
+  const re = /\b([\w.\/\-]+\.(?:xyz|cif|pdb|sdf|mol2|traj))\b/gi;
+  // Only scan assistant replies — tool-result contains ls output and
+  // other noise that references unrelated files from the workspace
+  const relevantTypes = new Set(['assistant', 'result']);
+  const seen = new Set();
+  const files = [];
+  for (const e of entries) {
+    if (!relevantTypes.has(e.type)) continue;
+    const text = e.content || '';
+    for (const m of text.matchAll(re)) {
+      const name = m[1];
+      const basename = name.split('/').pop();
+      // Skip version-number-like patterns, duplicates, or common non-structure files
+      if (/^\d/.test(name) || seen.has(basename)) continue;
+      // Skip paths that look like skill/doc references
+      if (/skills\/|SKILL|\.md$|examples?\//i.test(name)) continue;
+      seen.add(basename);
+      files.push({ name: basename, path: name });
+    }
+  }
+  return files;
+}
+
+async function loadWorkspaceTranscriptMini() {
+  const panel = d('workspace-transcript-mini');
+  if (!panel) return;
+
+  // Don't overwrite live streaming content while agent is running
+  if (agentRunningForWebChat) return;
+
+  const sid = findTranscriptForThread();
+  if (!sid) {
+    detectedStructureFiles = [];
+    panel.innerHTML = '<div class="workspace-empty">Transcript for this conversation will appear here once the agent runs.</div>';
+    renderWorkspaceArtifacts();
+    return;
+  }
+
+  panel.innerHTML = '<div class="workspace-empty">Loading...</div>';
+  try {
+    const entries = await (await fetch(`/api/transcript/json?group=web_chat&file=${enc(sid)}.jsonl`)).json();
+
+    // Extract crystal files from transcript
+    detectedStructureFiles = extractStructureFiles(entries);
+    renderWorkspaceArtifacts();
+
+    panel.innerHTML = '';
+    if (!entries.length) {
+      panel.innerHTML = '<div class="workspace-empty">Empty transcript.</div>';
+      return;
+    }
+    for (const e of entries) {
+      const row = document.createElement('div');
+      const typeClass = e.is_error ? 'type-error' : `type-${e.type}`;
+      row.className = `workspace-transcript-mini-entry ${typeClass}`;
+      row.innerHTML = `<strong>${esc(e.type)}</strong> ${esc(e.time || '')}<br>${esc(String(e.content || '').slice(0, 180))}`;
+      panel.appendChild(row);
+    }
+    panel.scrollTop = panel.scrollHeight;
+  } catch {
+    detectedStructureFiles = [];
+    panel.innerHTML = '<div class="workspace-empty">Could not load transcript.</div>';
+  }
+}
+
+// ── Workspace group switcher ──
+let workspaceGroup = 'web_chat';
+
+async function loadWorkspaceGroupSelector() {
+  const select = d('workspace-group-select');
+  if (!select) return;
+  try {
+    const groups = await (await fetch('/api/groups')).json();
+    select.innerHTML = '';
+    for (const g of groups) {
+      const opt = document.createElement('option');
+      opt.value = g.folder;
+      opt.textContent = g.folder + (g.transcriptCount ? ` (${g.transcriptCount})` : '');
+      if (g.folder === workspaceGroup) opt.selected = true;
+      select.appendChild(opt);
+    }
+  } catch {}
+}
+
+async function switchWorkspaceGroup(folder) {
+  if (replayTimer || replayEntries.length) stopReplay();
+  workspaceGroup = folder;
+
+  if (folder !== 'web_chat') {
+    // Non-web_chat: hide composer, show group's transcripts in sidebar
+    document.querySelector('.chat-composer').style.display = 'none';
+    resetChatThreadView();
+    chatEmpty.style.display = 'none';
+    await loadGroupSessionSidebar(folder);
+  } else {
+    // Restore web_chat view
+    document.querySelector('.chat-composer').style.display = '';
+    d('chat-sidebar-title').textContent = 'Saved Sessions';
+    chatSessionList.innerHTML = '';
+    d('chat-session-search').style.display = '';
+    document.querySelector('.chat-session-new').style.display = '';
+    resetChatThreadView();
+    await loadChatSessions(currentChatThreadId);
+    await loadChatHistory(currentChatThreadId);
+  }
+
+  await loadWorkspaceTranscriptForGroup(folder);
+  await loadWorkspaceArtifactsForGroup(folder);
+}
+
+async function loadGroupSessionSidebar(folder) {
+  // Replace session list with transcript list for this group
+  d('chat-sidebar-title').textContent = folder + ' Transcripts';
+  d('chat-session-search').style.display = 'none';
+  document.querySelector('.chat-session-new').style.display = 'none';
+  chatSessionList.innerHTML = '<div class="workspace-empty">Loading...</div>';
+
+  try {
+    const transcripts = await (await fetch(`/api/transcripts?group=${enc(folder)}`)).json();
+    chatSessionList.innerHTML = '';
+    if (!transcripts.length) {
+      chatSessionList.innerHTML = '<div class="workspace-empty">No transcripts for this group.</div>';
+      return;
+    }
+    for (const t of transcripts) {
+      const item = document.createElement('div');
+      item.className = 'chat-session-item';
+      const kb = Math.max(1, Math.round(t.size / 1024));
+      const displayName = getTranscriptDisplayName(folder, t.file) || t.file.replace('.jsonl', '').slice(0, 12) + '...';
+      item.innerHTML =
+        `<div class="chat-session-item-top">` +
+          `<div class="chat-session-item-title">${esc(displayName)}</div>` +
+          `<div class="chat-session-item-actions">` +
+            `<button class="chat-session-action" data-action="replay" type="button" title="Replay demo">&#9654;</button>` +
+            `<button class="chat-session-action" data-action="rename" type="button" title="Rename">&#9998;</button>` +
+            `<button class="chat-session-action delete" data-action="delete" type="button" title="Delete permanently">&#128465;</button>` +
+          `</div>` +
+        `</div>` +
+        `<div class="chat-session-item-preview">${esc(t.modified.slice(0, 16).replace('T', ' '))} · ${kb} KB</div>`;
+      item.onclick = () => {
+        chatSessionList.querySelectorAll('.chat-session-item').forEach(el => el.classList.remove('active'));
+        item.classList.add('active');
+        loadGroupTranscriptAsChat(folder, t.file);
+      };
+      item.querySelector('[data-action="replay"]').onclick = (ev) => {
+        ev.stopPropagation();
+        startReplay(folder, t.file);
+      };
+      item.querySelector('[data-action="rename"]').onclick = (ev) => {
+        ev.stopPropagation();
+        const current = getTranscriptDisplayName(folder, t.file) || '';
+        const name = window.prompt('Rename this session:', current);
+        if (name === null) return;
+        setTranscriptDisplayName(folder, t.file, name.trim() || null);
+        loadGroupSessionSidebar(folder);
+      };
+      item.querySelector('[data-action="delete"]').onclick = async (ev) => {
+        ev.stopPropagation();
+        if (!confirm(`Delete this transcript permanently?\n${displayName}`)) return;
+        setTranscriptDisplayName(folder, t.file, null);
+        await fetch('/api/transcript/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ group: folder, file: t.file }),
+        });
+        await loadGroupSessionSidebar(folder);
+      };
+      chatSessionList.appendChild(item);
+    }
+    // Auto-load first transcript
+    chatSessionList.querySelector('.chat-session-item')?.classList.add('active');
+    await loadGroupTranscriptAsChat(folder, transcripts[0].file);
+  } catch {
+    chatSessionList.innerHTML = '<div class="workspace-empty">Failed to load transcripts.</div>';
+  }
+}
+
+async function loadGroupTranscriptAsChat(folder, file) {
+  activeGroup = folder; // Set for image path resolution
+  resetChatThreadView();
+  chatEmpty.style.display = 'none';
+  try {
+    if (!file) return;
+    const entries = await (await fetch(`/api/transcript/json?group=${enc(folder)}&file=${enc(file)}`)).json();
+    if (!entries.length) return;
+
+    // Extract crystal files for 3D rendering
+    const crystalFiles = extractStructureFiles(entries);
+
+    const divider = document.createElement('div');
+    divider.className = 'chat-date-divider';
+    divider.textContent = `${folder} — ${file.replace('.jsonl', '').slice(0, 8)}`;
+    chatThread.appendChild(divider);
+
+    for (const e of entries) {
+      if (e.type === 'user') {
+        appendChatBubble('user', e.content, null);
+      } else if (e.type === 'assistant') {
+        appendChatBubble('assistant', e.content, null);
+      }
+    }
+
+    // Render crystal structures not already embedded inline
+    for (const file of crystalFiles.filter(f => !renderedCrystalFiles.has(f.name)).slice(0, 6)) {
+      renderedCrystalFiles.add(file.name);
+      const row = document.createElement('div');
+      row.className = 'chat-row assistant';
+      const avatar = document.createElement('div');
+      avatar.className = 'chat-avatar assistant';
+      const img = document.createElement('img');
+      img.src = '/assets/matclaw-icon-square.png'; img.alt = 'MatClaw';
+      avatar.appendChild(img);
+      const bubble = document.createElement('div');
+      bubble.className = 'chat-bubble assistant';
+      const card = document.createElement('div');
+      card.className = 'chat-crystal-card';
+      const vid = 'gc-' + Math.random().toString(36).slice(2, 8);
+      card.innerHTML =
+        `<div class="chat-crystal-viewer" id="${vid}"></div>` +
+        `<div class="chat-crystal-bar">` +
+          `<span class="chat-crystal-name">${esc(file.name)}</span>` +
+          `<div class="chat-crystal-btns">` +
+            `<button class="chat-crystal-btn active" data-s="stick">Ball&Stick</button>` +
+            `<button class="chat-crystal-btn" data-s="sphere">Spacefill</button>` +
+            `<button class="chat-crystal-btn active" data-s="spin">Spin</button>` +
+          `</div>` +
+        `</div>`;
+      bubble.appendChild(card);
+      row.appendChild(avatar);
+      row.appendChild(bubble);
+      chatThread.appendChild(row);
+
+      const url = buildWebChatFileUrl(file.path, folder);
+      const ext = (file.name.match(/\.[^.]+$/) || ['.xyz'])[0].toLowerCase();
+      fetch(url).then(r => { if (!r.ok) throw 0; return r.text(); }).then(data => {
+        if (!data || data.length < 10 || data.startsWith('File not found') || data.startsWith('Failed')) { row.remove(); return; }
+        const container = d(vid);
+        if (!container) return;
+        const viewer = $3Dmol.createViewer(container, { backgroundColor: '#0f172a', antialias: true });
+        const multi = detectMolFormat(ext) === 'xyz' && countXyzFrames(data) > 1;
+        if (multi) viewer.addModelsAsFrames(data, 'xyz'); else viewer.addModel(data, detectMolFormat(ext));
+        viewer.setStyle({}, { stick: { radius: 0.15 }, sphere: { scale: 0.25 } });
+        viewer.zoomTo();
+        if (multi) { viewer.animate({ loop: 'forward', reps: 0, interval: 80 }); const n = card.querySelector('.chat-crystal-name'); if (n) n.textContent += ` (${countXyzFrames(data)} frames)`; const s = card.querySelector('[data-s="spin"]'); if (s) { s.dataset.s = 'animate'; s.textContent = '⏸ Pause'; } }
+        else viewer.spin('y');
+        viewer.render();
+        let spinning = !multi, animating = multi;
+        card.querySelectorAll('.chat-crystal-btn').forEach(btn => { btn.onclick = () => { const s = btn.dataset.s; if (s === 'spin') { spinning = !spinning; btn.classList.toggle('active', spinning); viewer.spin(spinning ? 'y' : false); } else if (s === 'animate') { animating = !animating; btn.classList.toggle('active', animating); if (animating) { viewer.animate({ loop: 'forward', reps: 0, interval: 80 }); btn.textContent = '⏸ Pause'; } else { viewer.stopAnimate(); btn.textContent = '▶ Play'; } } else { card.querySelectorAll('[data-s="stick"],[data-s="sphere"]').forEach(b => b.classList.remove('active')); btn.classList.add('active'); viewer.setStyle({}, {}); if (s === 'stick') viewer.setStyle({}, { stick: { radius: 0.15 }, sphere: { scale: 0.25 } }); else viewer.setStyle({}, { sphere: { scale: 1.0 } }); viewer.render(); } }; });
+      }).catch(() => { row.remove(); });
+    }
+
+    scrollChatEnd();
+  } catch {
+    chatThread.innerHTML = '<div class="chat-empty"><div class="chat-empty-title">Error</div><div class="chat-empty-sub">Could not load transcript for this group.</div></div>';
+  }
+}
+
+async function loadWorkspaceTranscriptForGroup(folder) {
+  const panel = d('workspace-transcript-mini');
+  if (!panel) return;
+
+  // For web_chat, use thread-based session matching
+  if (folder === 'web_chat') {
+    await loadWorkspaceTranscriptMini();
+    return;
+  }
+
+  // For other groups, load the latest transcript
+  panel.innerHTML = '<div class="workspace-empty">Loading...</div>';
+  try {
+    const transcripts = await (await fetch(`/api/transcripts?group=${enc(folder)}`)).json();
+    if (!transcripts.length) {
+      panel.innerHTML = '<div class="workspace-empty">No transcripts for this group.</div>';
+      detectedStructureFiles = [];
+      renderWorkspaceArtifacts();
+      return;
+    }
+    const latest = transcripts[0];
+    const entries = await (await fetch(`/api/transcript/json?group=${enc(folder)}&file=${enc(latest.file)}`)).json();
+
+    detectedStructureFiles = extractStructureFiles(entries);
+
+    panel.innerHTML = '';
+    if (!entries.length) {
+      panel.innerHTML = '<div class="workspace-empty">Empty transcript.</div>';
+      return;
+    }
+    for (const e of entries) {
+      const row = document.createElement('div');
+      const typeClass = e.is_error ? 'type-error' : `type-${e.type}`;
+      row.className = `workspace-transcript-mini-entry ${typeClass}`;
+      row.innerHTML = `<strong>${esc(e.type)}</strong> ${esc(e.time || '')}<br>${esc(String(e.content || '').slice(0, 180))}`;
+      panel.appendChild(row);
+    }
+    panel.scrollTop = panel.scrollHeight;
+  } catch {
+    panel.innerHTML = '<div class="workspace-empty">Could not load transcript.</div>';
+    detectedStructureFiles = [];
+  }
+  renderWorkspaceArtifacts();
+}
+
+async function loadWorkspaceArtifactsForGroup(folder) {
+  try {
+    const params = [`group=${enc(folder)}`];
+    if (folder === 'web_chat' && currentChatThreadId) {
+      params.push(`threadId=${enc(currentChatThreadId)}`);
+    }
+    chatArtifacts = await (await fetch(`/api/chat/artifacts?${params.join('&')}`)).json();
+  } catch {
+    chatArtifacts = { conversation: [], workspace: [] };
+  }
+  renderWorkspaceArtifacts();
+}
 
 function startDur() {
   stopDur();
@@ -3824,6 +4863,7 @@ function resetChatThreadView() {
   chatThread.appendChild(chatEmpty);
   chatEmpty.style.display = '';
   lastChatDateKey = '';
+  renderedCrystalFiles.clear();
 }
 
 function formatSessionRelative(timestamp) {
@@ -3891,6 +4931,7 @@ function renderChatSessions() {
         `<div class="chat-session-item-title">${esc(session.title || 'New chat')}</div>` +
         `<div class="chat-session-item-actions">` +
           `<button class="chat-session-action pin ${isPinned ? 'active' : ''}" type="button" data-action="pin" title="${isPinned ? 'Unpin session' : 'Pin session'}">&#128204;</button>` +
+          `<button class="chat-session-action" type="button" data-action="replay" title="Replay demo">&#9654;</button>` +
           `<button class="chat-session-action" type="button" data-action="rename" title="Rename session">&#9998;</button>` +
           `<button class="chat-session-action delete" type="button" data-action="delete" title="Delete session">&#128465;</button>` +
         `</div>` +
@@ -3904,6 +4945,30 @@ function renderChatSessions() {
     item.querySelector('[data-action="pin"]').onclick = async (e) => {
       e.stopPropagation();
       togglePinChatSession(session.id);
+    };
+    item.querySelector('[data-action="replay"]').onclick = async (e) => {
+      e.stopPropagation();
+      const sid = session.agent_session_id;
+      if (sid) {
+        const sids = sid.split(',').filter(Boolean);
+        if (sids.length > 1) {
+          startReplayMulti('web_chat', sids.map(s => s + '.jsonl'));
+        } else {
+          startReplay('web_chat', sids[0] + '.jsonl');
+        }
+      } else {
+        try {
+          const transcripts = await (await fetch('/api/transcripts?group=web_chat')).json();
+          if (!transcripts.length) { alert('No transcripts found.'); return; }
+          const threadTime = new Date(session.updated_at || session.created_at).getTime();
+          let best = transcripts[0], bestDiff = Infinity;
+          for (const t of transcripts) {
+            const diff = Math.abs(new Date(t.modified).getTime() - threadTime);
+            if (diff < bestDiff) { bestDiff = diff; best = t; }
+          }
+          startReplay('web_chat', best.file);
+        } catch { alert('Failed to load transcripts.'); }
+      }
     };
     item.querySelector('[data-action="rename"]').onclick = async (e) => {
       e.stopPropagation();
@@ -3946,6 +5011,8 @@ async function loadChatSessions(preferredThreadId) {
 
 async function switchChatSession(threadId) {
   if (!threadId || threadId === currentChatThreadId) return;
+  if (replayTimer || replayEntries.length) stopReplay();
+  transcriptPollFile = null; transcriptPollLastCount = 0;
   await fetch('/api/chat/switch', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -3959,7 +5026,7 @@ async function switchChatSession(threadId) {
   await loadChatSessions(threadId);
   await loadChatHistory(threadId);
   await loadChatArtifacts(threadId);
-  await loadWorkspaceTranscripts();
+  await loadWorkspaceTranscriptMini();
   d('chat-thinking').classList.remove('show');
 }
 
@@ -3973,7 +5040,7 @@ async function createChatSession() {
   await loadChatSessions(currentChatThreadId);
   await loadChatHistory(currentChatThreadId);
   await loadChatArtifacts(currentChatThreadId);
-  await loadWorkspaceTranscripts();
+  await loadWorkspaceTranscriptMini();
   chatInput.focus();
 }
 
@@ -4008,7 +5075,7 @@ async function deleteChatSession(threadId) {
   await loadChatSessions(currentChatThreadId);
   await loadChatHistory(currentChatThreadId);
   await loadChatArtifacts(currentChatThreadId);
-  await loadWorkspaceTranscripts();
+  await loadWorkspaceTranscriptMini();
   d('chat-thinking').classList.remove('show');
 }
 
@@ -4017,15 +5084,26 @@ function renderWorkspaceArtifacts() {
   if (!list) return;
   list.innerHTML = '';
 
+
+  // Filter workspace artifacts to those modified during the current thread's lifetime
+  const session = chatSessions.find(s => s.id === currentChatThreadId);
+  const threadStart = session?.created_at ? new Date(session.created_at).getTime() : 0;
+  const threadEnd = session?.updated_at ? new Date(session.updated_at).getTime() + 60000 : Date.now();
+
   const seen = new Set();
   const items = [...(chatArtifacts.conversation || []), ...(chatArtifacts.workspace || [])]
     .filter((item) => {
       const key = `${item.source}:${item.path}`;
       if (seen.has(key)) return false;
       seen.add(key);
+      // For workspace files, only show those modified within this thread's time range
+      if (item.source === 'workspace' && item.modified && threadStart) {
+        const mtime = new Date(item.modified).getTime();
+        return mtime >= threadStart && mtime <= threadEnd;
+      }
       return true;
     })
-    .slice(0, 14);
+    .slice(0, 20);
 
   if (!items.length) {
     list.innerHTML = '<div class="workspace-empty">Artifacts generated in this session will show up here for quick access.</div>';
@@ -4051,7 +5129,7 @@ function renderWorkspaceArtifacts() {
         `<div class="workspace-artifact-group-count">${groupItems.length}</div>` +
       `</div>`;
 
-    for (const item of groupItems.slice(0, 6)) {
+    for (const item of groupItems.slice(0, 10)) {
       const row = document.createElement('div');
       row.className = 'workspace-artifact-item';
       const sub = [
@@ -4071,7 +5149,10 @@ function renderWorkspaceArtifacts() {
         `<button class="workspace-artifact-open" type="button">Open</button>`;
       row.querySelector('button').onclick = () => {
         const url = artifactUrl;
+        const ext = (item.name.match(/\.[^.]+$/) || [''])[0].toLowerCase();
         if (item.kind === 'image') openImage(url);
+        else if (ext === '.html') window.open(url, '_blank', 'noopener');
+        else if (viewableExts.has(ext)) openFileViewer(url, item.name);
         else window.open(url, '_blank', 'noopener');
       };
       section.appendChild(row);
@@ -4169,6 +5250,9 @@ function onFileSelected(input) {
 
 function selectFile(file) {
   const isImage = file.type.startsWith('image/');
+  // Revoke previous blob URL if any
+  const prevSrc = d('chat-file-thumb').src;
+  if (prevSrc && prevSrc.startsWith('blob:')) URL.revokeObjectURL(prevSrc);
   pendingFile = { file, name: file.name, isImage };
   d('chat-file-name').textContent = `${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
   d('chat-file-preview').classList.add('show');
@@ -4186,7 +5270,9 @@ function selectFile(file) {
 function clearPendingFile() {
   pendingFile = null;
   d('chat-file-preview').classList.remove('show');
-  d('chat-file-thumb').src = '';
+  const thumb = d('chat-file-thumb');
+  if (thumb.src && thumb.src.startsWith('blob:')) URL.revokeObjectURL(thumb.src);
+  thumb.src = '';
 }
 
 async function uploadFile(file) {
@@ -4321,7 +5407,7 @@ function handleChatIncoming(data) {
     }
     loadChatSessions(currentChatThreadId).catch(() => {});
     loadChatArtifacts(currentChatThreadId).catch(() => {});
-    loadWorkspaceTranscripts().catch(() => {});
+    loadWorkspaceTranscriptMini().catch(() => {});
   }
 }
 
@@ -4393,6 +5479,7 @@ function appendChatBubble(role, text, timestamp, attachmentMeta) {
   appendChatDateDivider(timestamp);
   const row = document.createElement('div');
   row.className = `chat-row ${role}`;
+  if (attachmentMeta?.msgId) row.dataset.msgId = attachmentMeta.msgId;
 
   const avatar = document.createElement('div');
   avatar.className = `chat-avatar ${role}`;
@@ -4420,9 +5507,10 @@ function appendChatBubble(role, text, timestamp, attachmentMeta) {
       .replace(/([^\n])\n([^\n*#|>`\-\d![])/g, '$1\n\n$2');  // plain lines
     const bodyDiv = document.createElement('div');
     bodyDiv.className = 'md-body';
-    bodyDiv.innerHTML = renderText(chatText, 'web_chat');
+    bodyDiv.innerHTML = renderText(chatText, workspaceGroup || 'web_chat');
     enhanceMarkdown(bodyDiv);
     bubble.appendChild(bodyDiv);
+    embedCrystalViewers(bubble, chatText);
 
     if (attachmentMeta?.runTrace?.items?.length) {
       const trace = attachmentMeta.runTrace;
@@ -4489,6 +5577,257 @@ function appendChatBubble(role, text, timestamp, attachmentMeta) {
   scrollChatEnd();
 }
 
+// ── Chat context menu ──
+let ctxTargetRow = null;
+
+chatThread.addEventListener('contextmenu', e => {
+  const row = e.target.closest('.chat-row, .chat-crystal-card, .chat-date-divider');
+  if (!row) return;
+  e.preventDefault();
+  ctxTargetRow = row.closest('.chat-row') || row;
+  const menu = d('chat-ctx-menu');
+  menu.style.left = Math.min(e.clientX, window.innerWidth - 160) + 'px';
+  menu.style.top = Math.min(e.clientY, window.innerHeight - 80) + 'px';
+  menu.classList.add('open');
+});
+
+document.addEventListener('click', () => {
+  d('chat-ctx-menu').classList.remove('open');
+});
+
+function deleteChatRow() {
+  if (ctxTargetRow) {
+    // Permanently delete from DB if message has an ID
+    const msgId = ctxTargetRow.dataset?.msgId;
+    if (msgId) {
+      fetch('/api/chat/message/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messageId: msgId }),
+      }).catch(() => {});
+    }
+    // Remove from DOM
+    const prev = ctxTargetRow.previousElementSibling;
+    ctxTargetRow.remove();
+    if (prev?.classList?.contains('chat-date-divider')) {
+      const next = prev.nextElementSibling;
+      if (!next || next.classList.contains('chat-date-divider') || next.id === 'chat-empty') {
+        prev.remove();
+      }
+    }
+    ctxTargetRow = null;
+  }
+  d('chat-ctx-menu').classList.remove('open');
+}
+
+function copyChatMessage() {
+  if (ctxTargetRow) {
+    const bubble = ctxTargetRow.querySelector('.chat-bubble');
+    const text = bubble?.textContent || ctxTargetRow.textContent || '';
+    navigator.clipboard.writeText(text.trim()).catch(() => {});
+  }
+  d('chat-ctx-menu').classList.remove('open');
+}
+
+// ── Replay demo ──
+let replayEntries = [];
+let replayIdx = 0;
+let replayTimer = null;
+let replayPaused = false;
+let replayGroup = null;
+
+async function startReplayMulti(group, files) {
+  stopReplay();
+  activeGroup = group;
+  replayGroup = group;
+  if (tab !== 'workspace') switchTab('workspace');
+  document.body.classList.add('replay-mode');
+  document.querySelector('.chat-composer').style.display = 'none';
+  d('replay-bar').classList.add('active');
+  resetChatThreadView();
+  chatEmpty.style.display = 'none';
+  const transcriptPanel = d('workspace-transcript-mini');
+  if (transcriptPanel) transcriptPanel.innerHTML = '';
+
+  // Fetch and merge all transcript files
+  let allEntries = [];
+  for (const file of files) {
+    try {
+      const entries = await (await fetch(`/api/transcript/json?group=${enc(group)}&file=${enc(file)}`)).json();
+      allEntries = allEntries.concat(entries);
+    } catch {}
+  }
+  replayEntries = allEntries;
+
+  if (!replayEntries.length) {
+    d('replay-progress').textContent = 'No entries';
+    return;
+  }
+  replayIdx = 0;
+  replayPaused = false;
+  d('replay-progress').textContent = `0 / ${replayEntries.length}`;
+  replayNext();
+}
+
+async function startReplay(group, file) {
+  stopReplay();
+  activeGroup = group;
+  replayGroup = group;
+
+  // Switch to workspace mode so transcript panel is visible
+  if (tab !== 'workspace') switchTab('workspace');
+  document.body.classList.add('replay-mode');
+
+  // Hide composer, show replay bar
+  document.querySelector('.chat-composer').style.display = 'none';
+  d('replay-bar').classList.add('active');
+  resetChatThreadView();
+  chatEmpty.style.display = 'none';
+
+  try {
+    replayEntries = await (await fetch(`/api/transcript/json?group=${enc(group)}&file=${enc(file)}`)).json();
+  } catch {
+    replayEntries = [];
+  }
+
+  // Clear transcript mini panel for replay
+  const transcriptPanel = d('workspace-transcript-mini');
+  if (transcriptPanel) transcriptPanel.innerHTML = '';
+
+  if (!replayEntries.length) {
+    d('replay-progress').textContent = 'No entries';
+    return;
+  }
+
+  replayIdx = 0;
+  replayPaused = false;
+  d('replay-progress').textContent = `0 / ${replayEntries.length}`;
+  replayNext();
+}
+
+function replayAddTranscriptEntry(e) {
+  const panel = d('workspace-transcript-mini');
+  if (!panel) return;
+  const row = document.createElement('div');
+  const typeClass = e.is_error ? 'type-error' : `type-${e.type}`;
+  row.className = `workspace-transcript-mini-entry ${typeClass}`;
+  row.innerHTML = `<strong>${esc(e.type)}</strong> ${esc(e.time || '')}<br>${esc(String(e.content || '').slice(0, 200))}`;
+  panel.appendChild(row);
+  panel.scrollTop = panel.scrollHeight;
+}
+
+function replayNext() {
+  if (replayIdx >= replayEntries.length) {
+    d('replay-progress').textContent = `Done (${replayEntries.length} steps)`;
+    d('chat-thinking').classList.remove('show');
+    const crystalFiles = extractStructureFiles(replayEntries);
+    for (const f of crystalFiles.filter(x => !renderedCrystalFiles.has(x.name)).slice(0, 4)) {
+      renderedCrystalFiles.add(f.name);
+      embedSingleCrystalViewer(f, replayGroup);
+    }
+    return;
+  }
+  if (replayPaused) return;
+
+  const e = replayEntries[replayIdx];
+  const speed = parseInt(d('replay-speed').value) || 800;
+  replayIdx++;
+  d('replay-progress').textContent = `${replayIdx} / ${replayEntries.length}`;
+
+  // Always add to transcript panel
+  replayAddTranscriptEntry(e);
+
+  if (e.type === 'user') {
+    d('chat-thinking').classList.remove('show');
+    appendChatBubble('user', e.content, null);
+    const thinkDelay = Math.max(speed * 0.3, 100);
+    replayTimer = setTimeout(() => {
+      d('chat-thinking').classList.add('show');
+      replayTimer = setTimeout(replayNext, speed);
+    }, thinkDelay);
+  } else if (e.type === 'assistant') {
+    d('chat-thinking').classList.remove('show');
+    appendChatBubble('assistant', e.content, null);
+    const pause = speed + Math.min(e.content.length, speed);
+    replayTimer = setTimeout(replayNext, pause);
+  } else if (e.type === 'thinking') {
+    // Show thinking indicator, move fast
+    d('chat-thinking').classList.add('show');
+    replayTimer = setTimeout(replayNext, Math.max(speed * 0.15, 50));
+  } else if (e.type === 'tool-call' || e.type === 'tool-result') {
+    // Tool operations — keep thinking on, move at moderate speed
+    d('chat-thinking').classList.add('show');
+    replayTimer = setTimeout(replayNext, Math.max(speed * 0.25, 80));
+  } else {
+    // system, result, etc — skip fast
+    replayTimer = setTimeout(replayNext, Math.max(speed * 0.1, 30));
+  }
+}
+
+function toggleReplayPause() {
+  replayPaused = !replayPaused;
+  const btn = d('replay-bar').querySelector('.replay-btn');
+  if (btn) btn.textContent = replayPaused ? 'Resume' : 'Pause';
+  if (!replayPaused) replayNext();
+}
+
+function stopReplay() {
+  if (replayTimer) clearTimeout(replayTimer);
+  replayTimer = null;
+  replayEntries = [];
+  replayIdx = 0;
+  replayPaused = false;
+  d('replay-bar').classList.remove('active');
+  d('chat-thinking').classList.remove('show');
+  document.querySelector('.chat-composer').style.display = '';
+  document.body.classList.remove('replay-mode');
+}
+
+function embedSingleCrystalViewer(file, group) {
+  const row = document.createElement('div');
+  row.className = 'chat-row assistant';
+  const avatar = document.createElement('div');
+  avatar.className = 'chat-avatar assistant';
+  const img = document.createElement('img');
+  img.src = '/assets/matclaw-icon-square.png'; img.alt = 'MatClaw';
+  avatar.appendChild(img);
+  const bubble = document.createElement('div');
+  bubble.className = 'chat-bubble assistant';
+  const card = document.createElement('div');
+  card.className = 'chat-crystal-card';
+  const vid = 'rp-' + Math.random().toString(36).slice(2, 8);
+  card.innerHTML =
+    `<div class="chat-crystal-viewer" id="${vid}"></div>` +
+    `<div class="chat-crystal-bar">` +
+      `<span class="chat-crystal-name">${esc(file.name)}</span>` +
+      `<div class="chat-crystal-btns">` +
+        `<button class="chat-crystal-btn active" data-s="stick">Ball&Stick</button>` +
+        `<button class="chat-crystal-btn" data-s="sphere">Spacefill</button>` +
+        `<button class="chat-crystal-btn active" data-s="spin">Spin</button>` +
+      `</div>` +
+    `</div>`;
+  bubble.appendChild(card);
+  row.appendChild(avatar);
+  row.appendChild(bubble);
+  chatThread.appendChild(row);
+  scrollChatEnd();
+
+  const url = buildWebChatFileUrl(file.path, group);
+  const ext = (file.name.match(/\.[^.]+$/) || ['.xyz'])[0].toLowerCase();
+  fetch(url).then(r => { if (!r.ok) throw 0; return r.text(); }).then(data => {
+    if (!data || data.length < 10) { row.remove(); return; }
+    const container = d(vid);
+    if (!container) return;
+    const viewer = $3Dmol.createViewer(container, { backgroundColor: '#0f172a', antialias: true });
+    const multi = detectMolFormat(ext) === 'xyz' && countXyzFrames(data) > 1;
+    if (multi) viewer.addModelsAsFrames(data, 'xyz'); else viewer.addModel(data, detectMolFormat(ext));
+    viewer.setStyle({}, { stick: { radius: 0.15 }, sphere: { scale: 0.25 } });
+    viewer.zoomTo();
+    if (multi) viewer.animate({ loop: 'forward', reps: 0, interval: 80 }); else viewer.spin('y');
+    viewer.render();
+  }).catch(() => { row.remove(); });
+}
+
 function scrollChatEnd() {
   chatMessages.scrollTop = chatMessages.scrollHeight;
 }
@@ -4503,22 +5842,76 @@ async function loadChatHistory(threadId = currentChatThreadId) {
       chatEmpty.style.display = 'none';
       for (const msg of messages) {
         const role = msg.is_bot_message || msg.is_from_me ? 'assistant' : 'user';
-        appendChatBubble(role, msg.content, msg.timestamp);
+        appendChatBubble(role, msg.content, msg.timestamp, { msgId: msg.id });
       }
     }
   } catch {}
   loadChatArtifacts(threadId).catch(() => {});
+  // Scan transcript for crystal files and render at bottom of chat
+  appendTranscriptStructures().catch(() => {});
+}
+
+async function appendTranscriptStructures() {
+  if (typeof $3Dmol === 'undefined') return;
+  const sid = findTranscriptForThread();
+  if (!sid) return;
+
+  let entries;
+  try {
+    entries = await (await fetch(`/api/transcript/json?group=web_chat&file=${enc(sid)}.jsonl`)).json();
+  } catch { return; }
+
+  const files = extractStructureFiles(entries);
+  if (!files.length) return;
+
+  // Skip files already rendered by embedCrystalViewers
+  const newFiles = files.filter(f => !renderedCrystalFiles.has(f.name));
+  if (!newFiles.length) return;
+
+  const divider = document.createElement('div');
+  divider.className = 'chat-date-divider';
+  divider.textContent = `Structures (${newFiles.length})`;
+  chatThread.appendChild(divider);
+
+  for (const file of newFiles.slice(0, 6)) {
+    renderedCrystalFiles.add(file.name);
+    const row = document.createElement('div');
+    row.className = 'chat-row assistant';
+    const avatar = document.createElement('div');
+    avatar.className = 'chat-avatar assistant';
+    const img = document.createElement('img');
+    img.src = '/assets/matclaw-icon-square.png'; img.alt = 'MatClaw';
+    avatar.appendChild(img);
+    const bubble = document.createElement('div');
+    bubble.className = 'chat-bubble assistant';
+    const card = document.createElement('div');
+    card.className = 'chat-crystal-card';
+    bubble.appendChild(card);
+    row.appendChild(avatar); row.appendChild(bubble);
+    chatThread.appendChild(row);
+    lazyLoadCrystalViewer(card, file.path, workspaceGroup || 'web_chat');
+  }
+  scrollChatEnd();
 }
 
 loadChatSessions().then((threadId) => {
   loadChatHistory(threadId);
-  loadWorkspaceTranscripts().catch(() => {});
+  loadWorkspaceTranscriptMini().catch(() => {});
   renderChatRun();
 });
+
+// Load current operating mode
+async function loadMode() {
+  try {
+    const data = await (await fetch('/api/mode')).json();
+    d('mode-label').textContent = data.label || data.mode || 'Compute';
+  } catch {}
+}
 
 syncViewerMode();
 connect();
 loadGroups();
+loadMode();
 </script>
 </body>
 </html>
