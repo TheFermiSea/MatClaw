@@ -61,6 +61,9 @@ class MessageStream {
         this.waiting = r;
       });
       this.waiting = null;
+      // end() may have fired during the resume gap; re-check before re-awaiting
+      // a promise that will never resolve again (lost-wakeup hang).
+      if (this.done && this.queue.length === 0) return;
     }
   }
 }
