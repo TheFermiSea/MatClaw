@@ -5,17 +5,47 @@
 import http from 'http';
 import fs from 'fs';
 import path from 'path';
+import { execFile } from 'child_process';
 import { WebSocketServer, WebSocket } from 'ws';
 
 import { agentEvents, type AgentEvent } from './events.js';
 import { parseTranscript, formatLogEntries } from './transcript-parser.js';
 import { logger } from '../logger.js';
 import { DATA_DIR, GROUPS_DIR } from '../config.js';
-import { getRecentMessages, type WebChatThread } from '../db.js';
+import { getRecentMessages, deleteMessage, type WebChatThread } from '../db.js';
 import { handleWebChatMessage, setWebBroadcast } from '../channels/web.js';
 import type { ChannelOpts } from '../channels/registry.js';
 
 const PORT = parseInt(process.env.DASHBOARD_PORT || '3210', 10);
+
+/** Read POST body with a size limit to prevent DoS via unbounded accumulation. */
+function readBody(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  maxBytes = 64 * 1024,
+): Promise<string | null> {
+  return new Promise((resolve) => {
+    let body = '';
+    let aborted = false;
+    req.on('data', (chunk) => {
+      if (aborted) return;
+      body += chunk;
+      if (body.length > maxBytes) {
+        aborted = true;
+        res.writeHead(413, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Request body too large' }));
+        req.destroy();
+        resolve(null);
+      }
+    });
+    req.on('end', () => {
+      if (!aborted) resolve(body);
+    });
+    req.on('error', () => {
+      if (!aborted) resolve(null);
+    });
+  });
+}
 
 /** Recursively search for a file by basename within a directory (max 3 levels deep). */
 function findFileRecursive(
@@ -26,14 +56,10 @@ function findFileRecursive(
 ): string | null {
   if (depth > 3) return null;
   try {
-    for (const entry of fs.readdirSync(dir)) {
-      const full = path.join(dir, entry);
-      if (entry === basename && fs.statSync(full).isFile()) return full;
-      if (
-        depth < 3 &&
-        fs.statSync(full).isDirectory() &&
-        !entry.startsWith('.')
-      ) {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.name === basename && entry.isFile()) return full;
+      if (depth < 3 && entry.isDirectory() && !entry.name.startsWith('.')) {
         const found = findFileRecursive(full, basename, root, depth + 1);
         if (found) return found;
       }
@@ -42,7 +68,7 @@ function findFileRecursive(
     /* permission or read error, skip */
   }
   return null;
-} // v4: compact md, no breaks, hide br
+}
 
 let wss: WebSocketServer;
 
@@ -120,6 +146,22 @@ function listWorkspaceArtifacts(groupFolder: string): ChatArtifact[] {
     '.txt',
     '.html',
     '.zip',
+    // Crystal / molecular structure files
+    '.xyz',
+    '.cif',
+    '.pdb',
+    '.sdf',
+    '.mol2',
+    '.cube',
+    '.poscar',
+    '.vasp',
+    '.traj',
+    // Code / scripts
+    '.py',
+    '.sh',
+    '.yaml',
+    '.yml',
+    '.log',
   ]);
   const ignoredDirs = new Set(['logs', '.claude', 'conversations']);
   const items: ChatArtifact[] = [];
@@ -154,27 +196,32 @@ function listWorkspaceArtifacts(groupFolder: string): ChatArtifact[] {
   );
 }
 
-function getChatArtifacts(threadId?: string): {
+function getChatArtifacts(
+  threadId?: string,
+  groupFolder = 'web_chat',
+): {
   conversation: ChatArtifact[];
   workspace: ChatArtifact[];
 } {
   const conversation = new Map<string, ChatArtifact>();
-  const messages = getRecentMessages('web:chat', 200, threadId);
-  for (const msg of messages) {
-    for (const artifact of extractArtifactRefs(msg.content || '')) {
-      if (!conversation.has(artifact.path)) {
-        conversation.set(artifact.path, {
-          path: artifact.path,
-          name: path.basename(artifact.path),
-          kind: artifact.kind,
-          source: 'conversation',
-        });
+  if (groupFolder === 'web_chat') {
+    const messages = getRecentMessages('web:chat', 200, threadId);
+    for (const msg of messages) {
+      for (const artifact of extractArtifactRefs(msg.content || '')) {
+        if (!conversation.has(artifact.path)) {
+          conversation.set(artifact.path, {
+            path: artifact.path,
+            name: path.basename(artifact.path),
+            kind: artifact.kind,
+            source: 'conversation',
+          });
+        }
       }
     }
   }
   return {
     conversation: [...conversation.values()],
-    workspace: listWorkspaceArtifacts('web_chat'),
+    workspace: listWorkspaceArtifacts(groupFolder),
   };
 }
 
@@ -414,6 +461,43 @@ export function startDashboard(
       return;
     }
 
+    // ── API: Delete transcript file ──
+    if (url.pathname === '/api/transcript/delete' && req.method === 'POST') {
+      readBody(req, res).then((body) => {
+        if (body === null) return;
+        try {
+          const { group, file } = JSON.parse(body);
+          if (!group || !file || group.includes('..') || file.includes('..')) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Invalid parameters' }));
+            return;
+          }
+          const filePath = path.join(
+            DATA_DIR,
+            'sessions',
+            group,
+            '.claude',
+            'projects',
+            '-workspace-group',
+            file,
+          );
+          if (!fs.existsSync(filePath)) {
+            res.writeHead(404, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Transcript not found' }));
+            return;
+          }
+          fs.unlinkSync(filePath);
+          logger.info({ group, file }, 'Transcript deleted');
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true }));
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Invalid request' }));
+        }
+      });
+      return;
+    }
+
     // ── API: Transcript parsed as text ──
     if (url.pathname === '/api/transcript') {
       const group = url.searchParams.get('group');
@@ -510,7 +594,11 @@ export function startDashboard(
             'Content-Length': st.size,
             'Cache-Control': 'public, max-age=300',
           });
-          fs.createReadStream(fallback).pipe(res);
+          const fbStream = fs.createReadStream(fallback);
+          fbStream.on('error', () => {
+            if (!res.writableEnded) res.end();
+          });
+          fbStream.pipe(res);
           return;
         }
         res.writeHead(404);
@@ -518,6 +606,47 @@ export function startDashboard(
         return;
       }
       const ext = path.extname(resolved).toLowerCase();
+
+      // Auto-convert .traj (ASE binary trajectory) to multi-frame XYZ
+      if (ext === '.traj') {
+        // execFile imported at top level
+        const pyScript = `
+import sys, io
+from ase.io import read, write
+frames = read(sys.argv[1], index=':')
+buf = io.StringIO()
+write(buf, frames, format='extxyz')
+sys.stdout.write(buf.getvalue())
+`.trim();
+        const child = execFile(
+          'python3',
+          ['-c', pyScript, resolved],
+          { maxBuffer: 50 * 1024 * 1024, timeout: 30000 },
+          (err, stdout, stderr) => {
+            if (res.writableEnded || res.destroyed) return; // Client already gone
+            if (err) {
+              logger.warn(
+                { err: stderr || err.message },
+                'Failed to convert .traj to XYZ',
+              );
+              res.writeHead(500, { 'Content-Type': 'text/plain' });
+              res.end('Failed to convert trajectory file');
+              return;
+            }
+            res.writeHead(200, {
+              'Content-Type': 'text/plain; charset=utf-8',
+              'Cache-Control': 'public, max-age=60',
+            });
+            res.end(stdout);
+          },
+        );
+        // Kill python process if client disconnects early
+        res.on('close', () => {
+          if (!child.killed) child.kill();
+        });
+        return;
+      }
+
       const mimeTypes: Record<string, string> = {
         '.png': 'image/png',
         '.jpg': 'image/jpeg',
@@ -538,7 +667,11 @@ export function startDashboard(
         'Content-Length': stat.size,
         'Cache-Control': 'public, max-age=300',
       });
-      fs.createReadStream(resolved).pipe(res);
+      const fileStream = fs.createReadStream(resolved);
+      fileStream.on('error', () => {
+        if (!res.writableEnded) res.end();
+      });
+      fileStream.pipe(res);
       return;
     }
 
@@ -581,11 +714,8 @@ export function startDashboard(
         return;
       }
 
-      let body = '';
-      req.on('data', (chunk) => {
-        body += chunk;
-      });
-      req.on('end', () => {
+      readBody(req, res).then((body) => {
+        if (body === null) return;
         try {
           const { threadId } = JSON.parse(body);
           if (!threadId || typeof threadId !== 'string') {
@@ -593,7 +723,7 @@ export function startDashboard(
             res.end(JSON.stringify({ error: 'Missing threadId field' }));
             return;
           }
-          const thread = webChatController.switchSession(threadId);
+          const thread = webChatController!.switchSession(threadId);
           if (!thread) {
             res.writeHead(404, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Session not found' }));
@@ -621,11 +751,8 @@ export function startDashboard(
         return;
       }
 
-      let body = '';
-      req.on('data', (chunk) => {
-        body += chunk;
-      });
-      req.on('end', () => {
+      readBody(req, res).then((body) => {
+        if (body === null) return;
         try {
           const { threadId, title } = JSON.parse(body);
           if (
@@ -640,7 +767,7 @@ export function startDashboard(
             );
             return;
           }
-          const thread = webChatController.renameSession(threadId, title);
+          const thread = webChatController!.renameSession(threadId, title);
           if (!thread) {
             res.writeHead(404, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Session not found' }));
@@ -663,11 +790,8 @@ export function startDashboard(
         return;
       }
 
-      let body = '';
-      req.on('data', (chunk) => {
-        body += chunk;
-      });
-      req.on('end', () => {
+      readBody(req, res).then((body) => {
+        if (body === null) return;
         try {
           const { threadId } = JSON.parse(body);
           if (!threadId || typeof threadId !== 'string') {
@@ -675,7 +799,7 @@ export function startDashboard(
             res.end(JSON.stringify({ error: 'Missing threadId field' }));
             return;
           }
-          const result = webChatController.deleteSession(threadId);
+          const result = webChatController!.deleteSession(threadId);
           if (!result) {
             res.writeHead(404, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Session not found' }));
@@ -691,6 +815,30 @@ export function startDashboard(
       return;
     }
 
+    // ── API: Current operating mode ──
+    if (url.pathname === '/api/mode') {
+      // Read fresh from .env each time
+      let mode = 'compute';
+      try {
+        const envPath = path.join(process.cwd(), '.env');
+        const envContent = fs.readFileSync(envPath, 'utf-8');
+        const match = envContent.match(/INTELLIGENCE_MODE=(\S+)/);
+        if (match) mode = match[1];
+      } catch {
+        /* no .env */
+      }
+      const labels: Record<string, string> = {
+        compute: 'Compute',
+        intelligence: 'Intelligence',
+        modeling: 'Modeling',
+        'modeling+compute': 'Modeling + Compute',
+        'intelligence+compute': 'Autonomous Research',
+      };
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ mode, label: labels[mode] || mode }));
+      return;
+    }
+
     if (url.pathname === '/api/chat/history') {
       const threadId =
         url.searchParams.get('threadId') ||
@@ -703,12 +851,13 @@ export function startDashboard(
     }
 
     if (url.pathname === '/api/chat/artifacts') {
+      const group = url.searchParams.get('group') || 'web_chat';
       const threadId =
         url.searchParams.get('threadId') ||
         webChatController?.getActiveThreadId() ||
         undefined;
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(getChatArtifacts(threadId)));
+      res.end(JSON.stringify(getChatArtifacts(threadId, group)));
       return;
     }
 
@@ -758,13 +907,32 @@ export function startDashboard(
       return;
     }
 
+    // ── API: Delete a single message ──
+    if (url.pathname === '/api/chat/message/delete' && req.method === 'POST') {
+      readBody(req, res).then((body) => {
+        if (body === null) return;
+        try {
+          const { messageId } = JSON.parse(body);
+          if (!messageId || typeof messageId !== 'string') {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Missing messageId' }));
+            return;
+          }
+          deleteMessage(messageId);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true }));
+        } catch (err) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Failed to delete message' }));
+        }
+      });
+      return;
+    }
+
     // ── API: Chat send (POST fallback for non-WS clients) ──
     if (url.pathname === '/api/chat/send' && req.method === 'POST') {
-      let body = '';
-      req.on('data', (chunk) => {
-        body += chunk;
-      });
-      req.on('end', () => {
+      readBody(req, res).then((body) => {
+        if (body === null) return;
         try {
           const { text, threadId } = JSON.parse(body);
           if (!text || typeof text !== 'string') {
@@ -818,7 +986,11 @@ export function startDashboard(
         'Content-Type': mimeTypes[ext] || 'application/octet-stream',
         'Cache-Control': 'public, max-age=86400',
       });
-      fs.createReadStream(resolved).pipe(res);
+      const assetStream = fs.createReadStream(resolved);
+      assetStream.on('error', () => {
+        if (!res.writableEnded) res.end();
+      });
+      assetStream.pipe(res);
       return;
     }
 

@@ -12,7 +12,7 @@ export function escapeXml(s: string): string {
 export function formatMessages(messages: NewMessage[]): string {
   const lines = messages.map(
     (m) =>
-      `<message sender="${escapeXml(m.sender_name)}" time="${m.timestamp}">${escapeXml(m.content)}</message>`,
+      `<message sender="${escapeXml(m.sender_name)}" time="${escapeXml(m.timestamp)}">${escapeXml(m.content)}</message>`,
   );
   return `<messages>\n${lines.join('\n')}\n</messages>`;
 }
@@ -41,5 +41,9 @@ export function findChannel(
   channels: Channel[],
   jid: string,
 ): Channel | undefined {
-  return channels.find((c) => c.ownsJid(jid));
+  // Prefer connected channels to avoid processing messages for a disconnected channel
+  return (
+    channels.find((c) => c.ownsJid(jid) && c.isConnected()) ||
+    channels.find((c) => c.ownsJid(jid))
+  );
 }

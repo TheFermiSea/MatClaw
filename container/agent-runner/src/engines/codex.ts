@@ -148,12 +148,13 @@ export class CodexEngine implements AgentEngine {
       timestamp: new Date().toISOString(),
     });
     if (this.conversationLog.length > 200) {
-      // Archive before trimming so we don't lose history
-      this.archiveConversation(ctx);
+      // Archive before trimming so we don't lose history. Use a unique suffix
+      // so this mid-session archive isn't overwritten by the end-of-turn one.
+      this.archiveConversation(ctx, true);
       this.conversationLog = this.conversationLog.slice(-50);
     }
 
-    let newSessionId: string | undefined;
+    let newSessionId: string | undefined = effectiveThreadId;
     let resultText: string | null = null;
     let eventCount = 0;
 
@@ -231,9 +232,9 @@ export class CodexEngine implements AgentEngine {
       } else {
         throw err;
       }
+    } finally {
+      ipcPolling = false;
     }
-
-    ipcPolling = false;
 
     // Record assistant response for conversation archive
     if (resultText !== null) {
@@ -345,7 +346,7 @@ export class CodexEngine implements AgentEngine {
    * Equivalent of Claude's PreCompact hook — saves searchable history
    * so future sessions can recall context from past conversations.
    */
-  private archiveConversation(ctx: EngineContext): void {
+  private archiveConversation(ctx: EngineContext, uniqueSuffix = false): void {
     if (this.conversationLog.length === 0) return;
 
     try {
@@ -361,7 +362,8 @@ export class CodexEngine implements AgentEngine {
         .replace(/[^a-z0-9\u4e00-\u9fff]+/g, '-')
         .replace(/^-+|-+$/g, '')
         || 'conversation';
-      const filename = `${date}-${titleSlug}.md`;
+      const suffix = uniqueSuffix ? `-${Date.now()}` : '';
+      const filename = `${date}-${titleSlug}${suffix}.md`;
       const filePath = path.join(conversationsDir, filename);
 
       const now = new Date();
