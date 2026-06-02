@@ -369,6 +369,15 @@ function buildContainerArgs(
   // acceptable here because the deployment is private (Tailnet) and the agent
   // already runs as root for MPI/compute. Operator-approved 2026-05-29.
   args.push('-v', '/var/run/docker.sock:/var/run/docker.sock');
+  // The agent runs as the host uid (below), which is not in the socket's group
+  // inside the container — so add the socket's gid as a supplementary group, or
+  // the nested `docker run` for the mp MCP gets EACCES and the tool never starts.
+  try {
+    const sockGid = fs.statSync('/var/run/docker.sock').gid;
+    args.push('--group-add', String(sockGid));
+  } catch {
+    /* socket missing (e.g. no docker) — mp MCP simply won't be available */
+  }
 
   // Pass agent engine and model selection to container.
   // Read fresh from .env each time so users can switch without restarting.
