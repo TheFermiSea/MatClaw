@@ -361,6 +361,11 @@ function buildContainerArgs(
   // /home/node/.local/bin; make both paths explicit instead of relying on the
   // image default or the launching host user's environment.
   args.push('-e', 'HOME=/home/node');
+  // The agent runs as a host uid with no /etc/passwd entry in the image, so set
+  // USER/LOGNAME — otherwise Python's getpass.getuser() (used by mlip/atomate2/
+  // jobflow_remote deps) raises "No username set in the environment" and the tool dies.
+  args.push('-e', 'USER=matclaw');
+  args.push('-e', 'LOGNAME=matclaw');
   args.push('-e', `PATH=${containerPath}`);
 
   // Materials Project (mp) MCP runs as a nested `docker run`, so the agent
