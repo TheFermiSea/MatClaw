@@ -23,10 +23,8 @@ canonical design.
 Active MCP namespaces (visible to the agent via `allowedTools`):
 - `mcp__matclaw__*` — chat + scheduling primitives (existing)
 - `mcp__gmail__*` — email integration (existing)
-- `mcp__vaspilot__*` — VASPilot DFT workflow MCP (Phase 1)
 - `mcp__mp__*` — Materials Project (Phase 1; community MCP, MIT, digest-pinned)
 - `mcp__graphiti__*` — bi-temporal entity-graph memory (Phase 1)
-- `mcp__mem0__*` — per-session memory (Phase 1)
 - `mcp__arxiv__*` — arXiv search + semantic indexing (Phase 1)
 - `mcp__pymatgen_inputset__*` — VASP input-set generation (Phase 2)
 - `mcp__pymatgen_validation__*` — VASP validator → ConvergenceVerdict (Phase 2)
