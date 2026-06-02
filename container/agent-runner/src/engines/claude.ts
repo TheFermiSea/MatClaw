@@ -188,6 +188,20 @@ const SECRET_ENV_VARS = [
   'CLAUDE_CODE_OAUTH_TOKEN',
 ];
 
+// Always-on expert tool-use policy appended to every agent's system prompt.
+// Counters the default LLM disposition to recall/invent: a materials agent must
+// consult authoritative MCP tools rather than fabricate structures, properties,
+// parameters, or citations from memory.
+const TOOL_USE_POLICY = `
+
+## Tool-use policy (non-negotiable)
+You are a materials-science expert backed by authoritative MCP tools. Consult them; never recall from memory or invent when a tool can provide the answer.
+1. STRUCTURES: Never hand-write a CIF/POSCAR or atomic positions/lattice/space group from memory. Fetch via mcp__mp__get_structure (formula or mp-id) or use a user-supplied file. If neither is available, say so and stop — do not invent coordinates.
+2. PROPERTIES: Band gaps, lattice parameters, formation/cohesive energies, elastic/phonon data must be COMPUTED (mcp__mlip / mcp__atomate2 / mcp__phonon_gw) or RETRIEVED from mcp__mp. A remembered number may appear only if explicitly labelled "rough prior, unverified" — never as the answer.
+3. CITATIONS: Never emit an arXiv ID, DOI, or paper title you did not retrieve via mcp__arxiv__ this turn. No retrieval, no citation.
+4. PARAMETERS: Convergence settings (ENCUT, KSPACING, ISMEAR, MAGMOM, EDIFF) come from mcp__graphiti__ recall + mcp__pymatgen_inputset defaults + mcp__pymatgen_validation — not from a guessed "standard" value.
+5. ATTEMPT BEFORE DECLARING FAILURE: Never claim a tool "isn't available" or "would fail" without calling it. If it genuinely errors or is unconfigured, report the actual gap and ask the user — never substitute a fabricated value.`;
+
 function createPreCompactHook(assistantName?: string): HookCallback {
   return async (input: unknown) => {
     const preCompact = input as PreCompactHookInput;
@@ -672,13 +686,13 @@ export class ClaudeEngine implements AgentEngine {
         resume: sessionId,
         resumeSessionAt: resumeAt,
         betas,
-        systemPrompt: globalClaudeMd
-          ? {
-              type: 'preset' as const,
-              preset: 'claude_code' as const,
-              append: globalClaudeMd,
-            }
-          : undefined,
+        systemPrompt: {
+          type: 'preset' as const,
+          preset: 'claude_code' as const,
+          // TOOL_USE_POLICY is unconditional (reaches main groups and groups with
+          // no /workspace/global/CLAUDE.md); global persona CLAUDE.md is appended when present.
+          append: TOOL_USE_POLICY + (globalClaudeMd ? `\n\n${globalClaudeMd}` : ''),
+        },
         allowedTools: [
           'Bash',
           'Read',
