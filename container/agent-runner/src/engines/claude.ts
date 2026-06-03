@@ -200,7 +200,8 @@ You are a materials-science expert backed by authoritative MCP tools. Consult th
 2. PROPERTIES: Band gaps, lattice parameters, formation/cohesive energies, elastic/phonon data must be COMPUTED (mcp__mlip / mcp__atomate2 / mcp__phonon_gw) or RETRIEVED from mcp__mp. A remembered number may appear only if explicitly labelled "rough prior, unverified" — never as the answer.
 3. CITATIONS: Never emit an arXiv ID, DOI, or paper title you did not retrieve via mcp__arxiv__ this turn. No retrieval, no citation.
 4. PARAMETERS: Convergence settings (ENCUT, KSPACING, ISMEAR, MAGMOM, EDIFF) come from mcp__graphiti__ recall + mcp__pymatgen_inputset defaults + mcp__pymatgen_validation — not from a guessed "standard" value.
-5. ATTEMPT BEFORE DECLARING FAILURE: Never claim a tool "isn't available" or "would fail" without calling it. If it genuinely errors or is unconfigured, report the actual gap and ask the user — never substitute a fabricated value.`;
+5. ATTEMPT BEFORE DECLARING FAILURE: Never claim a tool "isn't available" or "would fail" without calling it. If it genuinely errors or is unconfigured, report the actual gap and ask the user — never substitute a fabricated value.
+6. EXECUTION LOCALITY: All heavy compute — DFT (VASP/QE: pw.x, vasp_std), MD (LAMMPS: lmp), Monte Carlo (RASPA3), and MLIP relaxation/MD/screening — MUST run on the SLURM compute nodes (vasp-0X) via mcp__jobflow_remote__submit_flow or an approved cluster sbatch path. NEVER run these solvers inside this container (no Bash pw.x/vasp_std/lmp/raspa3, no in-process MACE for production). This container is for orchestration, input generation, and analysis only. If SLURM dispatch is not configured, say so and stop — do not fall back to computing locally.`;
 
 function createPreCompactHook(assistantName?: string): HookCallback {
   return async (input: unknown) => {
@@ -249,6 +250,19 @@ function createSanitizeBashHook(): HookCallback {
       };
     }
 
+    // Block heavy solver launches inside the container — compute belongs on SLURM nodes.
+    const heavyCompute = findHeavyCompute(command);
+    if (heavyCompute) {
+      return {
+        decision: 'block',
+        reason:
+          `Blocked in-container execution of '${heavyCompute}'. Heavy compute (DFT/MD/MC/MLIP) ` +
+          'must run on the SLURM compute nodes (vasp-0X) via mcp__jobflow_remote__submit_flow or an ' +
+          'approved cluster sbatch path — never inside this orchestration container. If SLURM dispatch ' +
+          'is not configured, tell the user it must be wired; do not run the solver locally.',
+      };
+    }
+
     const unsetPrefix = `unset ${SECRET_ENV_VARS.join(' ')} 2>/dev/null; `;
     return {
       hookSpecificOutput: {
@@ -260,6 +274,23 @@ function createSanitizeBashHook(): HookCallback {
       },
     };
   };
+}
+
+// Detect in-container launches of heavy compute solvers (must go to SLURM nodes).
+// Returns the offending binary, or null. Skips read-only inspection commands.
+function findHeavyCompute(command: string): string | null {
+  if (
+    /^\s*(?:which|type|command\s+-v|module|ls|cat|grep|rg|find|echo|head|tail|test|\[|stat|file|man)\b/.test(
+      command,
+    )
+  ) {
+    return null;
+  }
+  const m =
+    /(?:^|[\s;&|(/])(vasp_std|vasp_gam|vasp_ncl|vasp_gpu|pw\.x|ph\.x|cp\.x|projwfc\.x|dos\.x|bands\.x|lmp_mpi|lmp_serial|lmp|raspa3|raspa)(?=$|[\s;&|<>)'"])/i.exec(
+      command,
+    );
+  return m ? m[1] : null;
 }
 
 function findLongSleep(command: string, maxSeconds: number): number | null {
